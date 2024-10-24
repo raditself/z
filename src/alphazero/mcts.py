@@ -1,67 +1,66 @@
 
 import math
 import numpy as np
+import multiprocessing as mp
+from functools import partial
 
 class MCTS:
-    def __init__(self, game, model, num_simulations=800, c_puct=1.0):
+    def __init__(self, game, model, num_simulations=800, c_puct=1.0, num_processes=4):
         self.game = game
         self.model = model
         self.num_simulations = num_simulations
         self.c_puct = c_puct
-        self.Qsa = {}  # stores Q values for s,a
-        self.Nsa = {}  # stores #times edge s,a was visited
-        self.Ns = {}   # stores #times board s was visited
-        self.Ps = {}   # stores initial policy (returned by neural net)
+        self.num_processes = num_processes
+        self.action_size = game.action_size
+        self.transposition_table = {}
 
     def search(self, state):
-        for _ in range(self.num_simulations):
-            self._simulate(state)
+        if self.num_processes > 1:
+            with mp.Pool(self.num_processes) as pool:
+                results = pool.map(partial(self._simulate, state=state), range(self.num_simulations))
+        else:
+            results = [self._simulate(state) for _ in range(self.num_simulations)]
 
         s = self.game.get_state()
-        counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.action_size)]
+        counts = np.bincount(results, minlength=self.action_size)
         return counts
 
     def _simulate(self, state):
-        s = self.game.get_state()
-        if self.game.is_game_over():
-            return -self.game.get_winner()
+        game_copy = self.game.clone()
+        s = game_copy.get_state()
 
-        if s not in self.Ps:
-            self.Ps[s], v = self.model(state)
-            self.Ps[s] = self.Ps[s].exp().detach().numpy()
-            valid_moves = self.game.get_legal_moves()
-            self.Ps[s] = self.Ps[s] * valid_moves  # mask invalid moves
-            sum_Ps_s = np.sum(self.Ps[s])
-            if sum_Ps_s > 0:
-                self.Ps[s] /= sum_Ps_s  # renormalize
-            else:
-                print("All valid moves were masked, do workaround.")
-                self.Ps[s] = self.Ps[s] + valid_moves
-                self.Ps[s] /= np.sum(self.Ps[s])
-            self.Ns[s] = 0
-            return -v
+        if s in self.transposition_table:
+            return self.transposition_table[s]
 
-        best_u, best_a = -float('inf'), -1
-        for a in range(self.game.action_size):
-            if (s, a) in self.Qsa:
-                u = self.Qsa[(s, a)] + self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s]) / (1 + self.Nsa[(s, a)])
-            else:
-                u = self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s] + 1e-8)
+        if game_copy.is_game_over():
+            return -game_copy.get_winner()
 
-            if u > best_u:
-                best_u = u
-                best_a = a
+        policy, v = self.model(state)
+        policy = policy.exp().detach().numpy()
+        valid_moves = game_copy.get_legal_moves()
+        policy = policy * valid_moves  # mask invalid moves
+        policy_sum = np.sum(policy)
 
-        a = best_a
-        self.game.make_move(a)
-        v = self._simulate(self.game.get_state())
-
-        if (s, a) in self.Qsa:
-            self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / (self.Nsa[(s, a)] + 1)
-            self.Nsa[(s, a)] += 1
+        if policy_sum > 0:
+            policy /= policy_sum  # renormalize
         else:
-            self.Qsa[(s, a)] = v
-            self.Nsa[(s, a)] = 1
+            policy = valid_moves / np.sum(valid_moves)
 
-        self.Ns[s] += 1
+        best_a = np.argmax(policy + np.random.randn(self.action_size) * 1e-5)
+        game_copy.make_move(best_a)
+        v = self._simulate(game_copy.get_state())
+
+        self.transposition_table[s] = best_a
         return -v
+
+    def get_action_prob(self, state, temp=1):
+        counts = self.search(state)
+        if temp == 0:
+            best_a = np.argmax(counts)
+            probs = np.zeros(self.action_size)
+            probs[best_a] = 1
+            return probs
+        else:
+            counts = [x ** (1. / temp) for x in counts]
+            probs = [x / float(sum(counts)) for x in counts]
+            return probs
