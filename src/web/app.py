@@ -1,4 +1,12 @@
 
+from flask import render_template, jsonify, request, send_file
+from src.alphazero.model import export_model, import_model, export_model_metadata, import_model_metadata
+import os
+
+
+from flask import render_template, jsonify
+from .visualization import generate_training_progress_graph
+
 from flask import Flask, render_template, request, jsonify
 from src.alphazero.game import ChessGame
 from src.alphazero.model import create_model
@@ -125,3 +133,46 @@ def play_against_ai():
 
 if __name__ == '__main__':
     app.run(debug=True, threaded=True)
+
+
+
+@app.route('/training_progress')
+def training_progress():
+    graph_url = generate_training_progress_graph()
+    return jsonify({'graph_url': graph_url})
+
+
+@app.route('/export_model', methods=['POST'])
+def export_model_route():
+    model_path = os.path.join(app.root_path, 'static', 'exported_model.pth')
+    metadata_path = os.path.join(app.root_path, 'static', 'model_metadata.json')
+    
+    export_model(app.model, model_path)
+    export_model_metadata(app.model, metadata_path)
+    
+    return jsonify({"message": "Model exported successfully"})
+
+@app.route('/import_model', methods=['POST'])
+def import_model_route():
+    if 'model_file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['model_file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if file:
+        model_path = os.path.join(app.root_path, 'static', 'imported_model.pth')
+        file.save(model_path)
+        import_model(app.model, model_path)
+        return jsonify({"message": "Model imported successfully"})
+
+@app.route('/download_model')
+def download_model():
+    model_path = os.path.join(app.root_path, 'static', 'exported_model.pth')
+    return send_file(model_path, as_attachment=True)
+
+@app.route('/download_metadata')
+def download_metadata():
+    metadata_path = os.path.join(app.root_path, 'static', 'model_metadata.json')
+    return send_file(metadata_path, as_attachment=True)

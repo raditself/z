@@ -1,32 +1,38 @@
 
+from .mcts import MCTS
+from .game import Game
+from .model import AlphaZeroNetwork
 import numpy as np
-from src.alphazero.mcts import MCTS
 
-class SelfPlay:
-    def __init__(self, game, model, num_mcts_sims):
-        self.game = game
-        self.model = model
-        self.mcts = MCTS(game, model, num_mcts_sims)
+def execute_self_play(model, game, num_games, args):
+    mcts = MCTS(game, model, args)
+    examples = []
 
-    def execute_episode(self):
-        train_examples = []
-        state = self.game.get_initial_state()
-        self.game.reset()
-        step = 0
+    for _ in range(num_games):
+        state = game.get_initial_state()
+        game_history = []
 
         while True:
-            step += 1
-            temp = int(step < 30)  # temperature threshold set to 30 moves
+            canonical_state = game.get_canonical_form(state)
+            actions, action_probs = mcts.search(canonical_state)
 
-            pi = self.mcts.search(state)
-            train_examples.append([state, pi, None])
+            # Add exploration noise to the action probabilities
+            action_probs = add_exploration_noise(action_probs, args.dirichlet_alpha, args.exploration_fraction)
 
-            action = np.random.choice(len(pi), p=pi)
-            state = self.game.get_next_state(action)
+            game_history.append((canonical_state, action_probs, state.to_play))
 
-            if self.game.is_game_over():
-                return [(x[0], x[1], self.game.get_winner() * ((-1) ** (x[0] != state))) for x in train_examples]
+            # Choose action based on the action probabilities
+            action = np.random.choice(actions, p=action_probs)
+            state = game.get_next_state(state, action)
 
-def execute_self_play(game, model, num_mcts_sims):
-    self_play = SelfPlay(game, model, num_mcts_sims)
-    return self_play.execute_episode()
+            if game.is_game_over(state):
+                value = game.get_game_ended(state)
+                examples.extend([(state, action_prob, value) for state, action_prob, _ in game_history])
+                break
+
+    return examples
+
+def add_exploration_noise(action_probs, alpha, exploration_fraction):
+    noise = np.random.dirichlet([alpha] * len(action_probs))
+    return (1 - exploration_fraction) * np.array(action_probs) + exploration_fraction * noise
+

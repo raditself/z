@@ -1,3 +1,4 @@
+
 import random
 
 def generate_chess960_position():
@@ -52,3 +53,43 @@ def setup_chess960_board():
     board[1] = [-1] * 8
     
     return board
+
+
+class MiniChess:
+    def __init__(self):
+        self.board_size = 5
+        self.initial_state = [
+            ['r', 'n', 'b', 'q', 'k'],
+            ['p', 'p', 'p', 'p', 'p'],
+            ['.', '.', '.', '.', '.'],
+            ['P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K']
+        ]
+
+class GrandChess:
+    def __init__(self):
+        self.board_size = 10
+        self.initial_state = [
+            ['r', 'n', 'b', 'q', 'k', 'c', 'a', 'b', 'n', 'r'],
+            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+            ['.', '.', '.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.', '.', '.'],
+            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K', 'C', 'A', 'B', 'N', 'R']
+        ]
+        # 'c' represents Chancellor (Rook + Knight)
+        # 'a' represents Archbishop (Bishop + Knight)
+
+def get_chess_variant(variant_name):
+    if variant_name == 'standard':
+        return StandardChess()
+    elif variant_name == 'mini':
+        return MiniChess()
+    elif variant_name == 'grand':
+        return GrandChess()
+    else:
+        raise ValueError("Unknown chess variant: " + str(variant_name))

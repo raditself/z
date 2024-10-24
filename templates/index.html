@@ -22,5 +22,21 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <div id="training-progress">
+        <h2>Training Progress</h2>
+        <img id="training-progress-graph" src="" alt="Training Progress Graph">
+    </div>
+
+    <div id="model-management">
+        <h2>Model Management</h2>
+        <button id="export-model">Export Model</button>
+        <button id="download-model">Download Model</button>
+        <button id="download-metadata">Download Metadata</button>
+        <input type="file" id="import-model-input" style="display: none;">
+        <button id="import-model">Import Model</button>
+    </div>
 </body>
+
+
 </html>

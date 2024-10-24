@@ -1,5 +1,10 @@
 
 import torch
+import os
+import json
+
+
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -54,3 +59,49 @@ class ChessModel(nn.Module):
         value = value.detach().numpy()[0][0]
         
         return policy, value
+
+
+def export_model(model, file_path):
+    """
+    Export the model to a file.
+    """
+    model_state = model.state_dict()
+    torch.save(model_state, file_path)
+    print("Model exported to " + file_path)
+
+def import_model(model, file_path):
+    """
+    Import the model from a file.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError("Model file not found: " + file_path)
+    
+    model_state = torch.load(file_path)
+    model.load_state_dict(model_state)
+    print("Model imported from " + file_path)
+
+def export_model_metadata(model, file_path):
+    """
+    Export model metadata (architecture, hyperparameters) to a JSON file.
+    """
+    metadata = {
+        "architecture": str(model),
+        "num_layers": model.num_layers,
+        "num_channels": model.num_channels,
+        # Add any other relevant metadata
+    }
+    
+    with open(file_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    print("Model metadata exported to " + file_path)
+
+def import_model_metadata(file_path):
+    """
+    Import model metadata from a JSON file.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError("Metadata file not found: " + file_path)
+    
+    with open(file_path, 'r') as f:
+        metadata = json.load(f)
+    return metadata

@@ -118,3 +118,50 @@ fetch('/get_game_state')
     .catch((error) => {
         console.error('Error:', error);
     });
+
+function updateTrainingProgress() {
+    fetch('/training_progress')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('training-progress-graph').src = data.graph_url;
+        });
+}
+
+// Call updateTrainingProgress every 60 seconds
+setInterval(updateTrainingProgress, 60000);
+
+// Initial call to display the graph
+updateTrainingProgress();
+
+document.getElementById('export-model').addEventListener('click', function() {
+    fetch('/export_model', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => alert(data.message));
+});
+
+document.getElementById('download-model').addEventListener('click', function() {
+    window.location.href = '/download_model';
+});
+
+document.getElementById('download-metadata').addEventListener('click', function() {
+    window.location.href = '/download_metadata';
+});
+
+document.getElementById('import-model').addEventListener('click', function() {
+    document.getElementById('import-model-input').click();
+});
+
+document.getElementById('import-model-input').addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const formData = new FormData();
+        formData.append('model_file', file);
+        
+        fetch('/import_model', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => alert(data.message));
+    }
+});
