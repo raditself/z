@@ -5,52 +5,80 @@ import multiprocessing as mp
 from functools import partial
 
 class MCTS:
-    def __init__(self, game, model, num_simulations=800, c_puct=1.0, num_processes=4):
+    def __init__(self, game, model, num_simulations=800, c_puct=1.0):
         self.game = game
         self.model = model
         self.num_simulations = num_simulations
         self.c_puct = c_puct
-        self.num_processes = num_processes
-        self.action_size = game.action_size
-        self.transposition_table = {}
+        self.Qsa = {}  # stores Q values for s,a
+        self.Nsa = {}  # stores #times edge s,a was visited
+        self.Ns = {}   # stores #times board s was visited
+        self.Ps = {}   # stores initial policy (returned by neural net)
+
+        self.Es = {}   # stores game.get_game_ended ended for board s
+        self.Vs = {}   # stores game.get_valid_moves for board s
 
     def search(self, state):
-        if self.num_processes > 1:
-            with mp.Pool(self.num_processes) as pool:
-                results = pool.map(partial(self._simulate, state=state), range(self.num_simulations))
-        else:
-            results = [self._simulate(state) for _ in range(self.num_simulations)]
-
         s = self.game.get_state()
-        counts = np.bincount(results, minlength=self.action_size)
+        for _ in range(self.num_simulations):
+            self._search(s)
+        
+        s = self.game.get_state()
+        counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.action_size)]
         return counts
 
-    def _simulate(self, state):
-        game_copy = self.game.clone()
-        s = game_copy.get_state()
+    def _search(self, s):
+        if s not in self.Es:
+            self.Es[s] = self.game.is_game_over()
+        if self.Es[s] != 0:
+            return -self.Es[s]
 
-        if s in self.transposition_table:
-            return self.transposition_table[s]
+        if s not in self.Ps:
+            self.Ps[s], v = self.model(self.game.get_state())
+            self.Ps[s] = self.Ps[s].exp().detach().numpy()
+            valids = self.game.get_legal_moves()
+            self.Ps[s] = self.Ps[s] * valids  # masking invalid moves
+            sum_Ps_s = np.sum(self.Ps[s])
+            if sum_Ps_s > 0:
+                self.Ps[s] /= sum_Ps_s  # renormalize
+            else:
+                print("All valid moves were masked, do workaround.")
+                self.Ps[s] = self.Ps[s] + valids
+                self.Ps[s] /= np.sum(self.Ps[s])
+            
+            self.Vs[s] = valids
+            self.Ns[s] = 0
+            return -v
 
-        if game_copy.is_game_over():
-            return -game_copy.get_winner()
+        valids = self.Vs[s]
+        cur_best = -float('inf')
+        best_act = -1
 
-        policy, v = self.model(state)
-        policy = policy.exp().detach().numpy()
-        valid_moves = game_copy.get_legal_moves()
-        policy = policy * valid_moves  # mask invalid moves
-        policy_sum = np.sum(policy)
+        for a in range(self.game.action_size):
+            if valids[a]:
+                if (s, a) in self.Qsa:
+                    u = self.Qsa[(s, a)] + self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s]) / (1 + self.Nsa[(s, a)])
+                else:
+                    u = self.c_puct * self.Ps[s][a] * math.sqrt(self.Ns[s] + 1e-8)  # Q = 0 ?
 
-        if policy_sum > 0:
-            policy /= policy_sum  # renormalize
+                if u > cur_best:
+                    cur_best = u
+                    best_act = a
+
+        a = best_act
+        next_s = self.game.get_next_state(a)
+        self.game.make_move(a)
+
+        v = self._search(next_s)
+
+        if (s, a) in self.Qsa:
+            self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / (self.Nsa[(s, a)] + 1)
+            self.Nsa[(s, a)] += 1
         else:
-            policy = valid_moves / np.sum(valid_moves)
+            self.Qsa[(s, a)] = v
+            self.Nsa[(s, a)] = 1
 
-        best_a = np.argmax(policy + np.random.randn(self.action_size) * 1e-5)
-        game_copy.make_move(best_a)
-        v = self._simulate(game_copy.get_state())
-
-        self.transposition_table[s] = best_a
+        self.Ns[s] += 1
         return -v
 
     def get_action_prob(self, state, temp=1):

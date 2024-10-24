@@ -1,30 +1,29 @@
+import argparse
 from src.alphazero.game import ChessGame
 from src.alphazero.ai import ChessAI
+from src.alphazero.model import ChessModel
+from src.alphazero.train import TrainAlphaZero
 from src.alphazero.game_analysis import analyze_game, suggest_improvements
 
-def main():
-    # Initialize the game
-    game = ChessGame(initial_time=600, increment=10, variant='standard')  # 10 minutes + 10 seconds increment
-    ai = ChessAI(difficulty='medium')
+def train_alphazero(args):
+    game = ChessGame()
+    model = ChessModel()
+    trainer = TrainAlphaZero(game, model, args)
+    trainer.learn()
 
-    # Main game loop
+def play_against_ai(args):
+    game = ChessGame(initial_time=600, increment=10, variant='standard')
+    ai = ChessAI(difficulty=args.difficulty)
+
     while not game.is_game_over():
         print(game.board)
         print(f"Current player: {'White' if game.current_player == 1 else 'Black'}")
-        print(f"Remaining time - White: {game.get_remaining_time(1):.1f}s, Black: {game.get_remaining_time(-1):.1f}s")
 
         if game.current_player == 1:  # Human player (White)
             move = input("Enter your move (e.g., e2e4): ")
             move = game.algebraic_to_move(move)
         else:  # AI player (Black)
             move = ai.get_move(game)
-
-        # Highlight legal moves for the selected piece
-        if game.current_player == 1:
-            from_row, from_col, _, _ = move
-            highlighted_board = game.highlight_legal_moves(from_row, from_col)
-            print("Highlighted legal moves:")
-            print(highlighted_board)
 
         game.make_move(move)
 
@@ -42,6 +41,20 @@ def main():
     print("\nSuggested Improvements:")
     for suggestion in improvements:
         print(f"Move {suggestion['move_number']}: {suggestion['suggestion']}")
+
+def main():
+    parser = argparse.ArgumentParser(description="AlphaZero Chess")
+    parser.add_argument("mode", choices=["train", "play"], help="Mode: train AlphaZero or play against AI")
+    parser.add_argument("--difficulty", choices=["easy", "medium", "hard"], default="medium", help="AI difficulty when playing")
+    parser.add_argument("--iterations", type=int, default=100, help="Number of training iterations")
+    parser.add_argument("--episodes", type=int, default=100, help="Number of self-play episodes per iteration")
+    parser.add_argument("--mcts_simulations", type=int, default=100, help="Number of MCTS simulations per move")
+    args = parser.parse_args()
+
+    if args.mode == "train":
+        train_alphazero(args)
+    elif args.mode == "play":
+        play_against_ai(args)
 
 if __name__ == "__main__":
     main()
