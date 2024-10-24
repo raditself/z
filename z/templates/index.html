@@ -1,0 +1,42 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaZero Chess</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>AlphaZero Chess</h1>
+    <div id="game-container">
+        <div id="chessboard"></div>
+        <div id="game-info">
+            <p>Current Player: <span id="current-player"></span></p>
+            <p>Game Status: <span id="game-status"></span></p>
+        </div>
+    </div>
+    <button id="reset-game">Reset Game</button>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <div id="training-progress">
+        <h2>Training Progress</h2>
+        <img id="training-progress-graph" src="" alt="Training Progress Graph">
+    </div>
+
+    <div id="model-management">
+        <h2>Model Management</h2>
+        <button id="export-model">Export Model</button>
+        <button id="download-model">Download Model</button>
+        <button id="download-metadata">Download Metadata</button>
+        <input type="file" id="import-model-input" style="display: none;">
+        <button id="import-model">Import Model</button>
+    </div>
+</body>
+
+
+</html>
