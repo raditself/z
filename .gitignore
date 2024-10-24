@@ -13,3 +13,4 @@ build/
 *.pkl
 *.h5
 *.pt
+venv/
