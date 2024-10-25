@@ -1,127 +1,93 @@
-
-from .game import Game
-from .model import AlphaZeroNetwork, export_model, import_model
-from .self_play import execute_self_play
-from .logging_system import AdvancedLogger
 import torch
+import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
-from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
-import numpy as np
-import os
-import argparse
+from torch.utils.data import DataLoader, Subset
+from chess_dataset import ChessDataset
+from model import get_model
+from neural_architecture_search import neural_architecture_search
+import time
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+def train(config):
+    # Run neural architecture search
+    print("Running neural architecture search...")
+    best_model, best_performance = neural_architecture_search(config.db_path, num_trials=config.nas_trials)
+    print(f"Best model performance: {best_performance}")
+    print(f"Best model architecture: {best_model}")
 
-def cleanup():
-    dist.destroy_process_group()
+    # Save the best model
+    torch.save(best_model.state_dict(), "best_model.pth")
 
-def train_network(rank, world_size, game, model, args, logger):
-    setup(rank, world_size)
-    
-    device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model = DistributedDataParallel(model, device_ids=[rank])
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma)
-    
-    for iteration in range(args.num_iterations):
-        # Self-play
-        examples = execute_self_play(model.module, game, args.num_self_play_games // world_size, args)
-        
-        # Synchronize examples across all processes
-        all_examples = [None for _ in range(world_size)]
-        dist.all_gather_object(all_examples, examples)
-        examples = [ex for exs in all_examples for ex in exs]
-        
-        # Create dataset and sampler
-        dataset = TensorDataset(
-            torch.FloatTensor(np.array([ex[0] for ex in examples])),
-            torch.FloatTensor(np.array([ex[1] for ex in examples])),
-            torch.FloatTensor(np.array([ex[2] for ex in examples]).astype(np.float64))
-        )
-        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, sampler=sampler)
-        
-        # Train the model
+    # Load the best model
+    model = get_model("best_model.pth")
+
+    # Set up data loaders
+    print("Loading dataset...")
+    start_time = time.time()
+    full_dataset = ChessDataset(config.db_path)
+    print(f"Dataset loaded in {time.time() - start_time:.2f} seconds")
+
+    # Use only a subset of the data for testing
+    subset_size = min(10000, len(full_dataset))
+    subset_indices = torch.randperm(len(full_dataset))[:subset_size]
+    dataset = Subset(full_dataset, subset_indices)
+
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Validation dataset size: {len(val_dataset)}")
+
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=config.batch_size)
+
+    # Loss function and optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
+
+    # Training loop
+    for epoch in range(config.num_epochs):
+        start_time = time.time()
         model.train()
-        for epoch in range(args.epochs):
-            sampler.set_epoch(epoch)
-            for boards, target_pis, target_vs in dataloader:
-                boards, target_pis, target_vs = boards.to(device), target_pis.to(device), target_vs.to(device)
+        total_loss = 0
+        for batch_idx, batch in enumerate(train_loader):
+            inputs, targets = batch
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
 
-                # Compute output and loss
-                out_pi, out_v = model(boards)
-                pi_loss = F.cross_entropy(out_pi, target_pis)
-                v_loss = F.mse_loss(out_v.squeeze(), target_vs)
-                total_loss = pi_loss + v_loss
+            if (batch_idx + 1) % 10 == 0:
+                print(f"Epoch {epoch+1}/{config.num_epochs}, Batch {batch_idx+1}/{len(train_loader)}, Loss: {total_loss / (batch_idx + 1):.4f}")
 
-                # Backward and optimize
-                optimizer.zero_grad()
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                optimizer.step()
+        # Validation
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for batch in val_loader:
+                inputs, targets = batch
+                outputs = model(inputs)
+                val_loss += criterion(outputs, targets).item()
+        val_loss /= len(val_loader)
 
-        scheduler.step()
+        epoch_time = time.time() - start_time
+        print(f"Epoch {epoch+1}/{config.num_epochs}, Train Loss: {total_loss / len(train_loader):.4f}, Validation Loss: {val_loss:.4f}, Time: {epoch_time:.2f} seconds")
 
-        # Evaluate the model (only on rank 0)
-        if rank == 0:
-            model.eval()
-            test_examples = execute_self_play(model.module, game, args.num_test_games, args)
-            test_boards, test_pis, test_vs = zip(*test_examples)
-            test_boards = torch.FloatTensor(np.array(test_boards)).to(device)
-            test_pis = torch.FloatTensor(np.array(test_pis)).to(device)
-            test_vs = torch.FloatTensor(np.array(test_vs).astype(np.float64)).to(device)
+    # Save the final model
+    torch.save(model.state_dict(), "final_model.pth")
 
-            with torch.no_grad():
-                test_out_pi, test_out_v = model(test_boards)
-                test_pi_loss = F.cross_entropy(test_out_pi, test_pis)
-                test_v_loss = F.mse_loss(test_out_v.squeeze(), test_vs)
-                test_total_loss = test_pi_loss + test_v_loss
+if __name__ == "__main__":
+    import argparse
 
-            # Log the results
-            logger.log_training_progress(iteration, test_total_loss.item(), optimizer.param_groups[0]['lr'], 0)  # TODO: Add accuracy and Elo rating
+    parser = argparse.ArgumentParser(description="Train the chess model")
+    parser.add_argument("--db_path", type=str, required=True, help="Path to the SQLite database")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--num_epochs", type=int, default=5, help="Number of epochs")
+    parser.add_argument("--nas_trials", type=int, default=5, help="Number of trials for neural architecture search")
 
-            # Save the model
-            if iteration % args.checkpoint_interval == 0:
-                export_model(model.module, f'model_iteration_{iteration}.pth')
+    config = parser.parse_args()
+    train(config)
 
-    cleanup()
-    return model.module if rank == 0 else None
-
-def main(rank, world_size, args):
-    game = Game(variant='standard')  # You can change this to 'mini' or 'grand' for different variants
-    input_shape = (3, game.board_size, game.board_size)  # Adjust based on the game representation
-    model = AlphaZeroNetwork(input_shape, game.action_size)
-    
-    logger = AdvancedLogger()
-
-    trained_model = train_network(rank, world_size, game, model, args, logger)
-    if rank == 0:
-        export_model(trained_model, 'final_model.pth')
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Distributed AlphaZero Training')
-    parser.add_argument('--world_size', type=int, default=1, help='number of processes for distributed training')
-    parser.add_argument('--num_iterations', type=int, default=100, help='number of training iterations')
-    parser.add_argument('--num_self_play_games', type=int, default=100, help='number of self-play games per iteration')
-    parser.add_argument('--num_test_games', type=int, default=20, help='number of test games per iteration')
-    parser.add_argument('--epochs', type=int, default=10, help='number of epochs per iteration')
-    parser.add_argument('--batch_size', type=int, default=64, help='batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='initial learning rate for optimizer')
-    parser.add_argument('--lr_step_size', type=int, default=10, help='step size for learning rate scheduler')
-    parser.add_argument('--lr_gamma', type=float, default=0.1, help='gamma for learning rate scheduler')
-    parser.add_argument('--max_grad_norm', type=float, default=1.0, help='max norm of the gradients')
-    parser.add_argument('--checkpoint_interval', type=int, default=10, help='save model every N iterations')
-    parser.add_argument('--dirichlet_alpha', type=float, default=0.3, help='Dirichlet noise alpha parameter')
-    parser.add_argument('--exploration_fraction', type=float, default=0.25, help='fraction of moves for exploration')
-    args = parser.parse_args()
-
-    world_size = args.world_size
-    torch.multiprocessing.spawn(main, args=(world_size, args), nprocs=world_size, join=True)
