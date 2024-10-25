@@ -17,7 +17,14 @@ class MCTS:
         self.Vs = {}   # stores game.getValidMoves for board s
         self.tablebase = EndgameTablebase()
 
-    def getActionProb(self, canonicalBoard, temp=1):
+    def getActionProb(self, canonicalBoard, temp=1, time_left=None):
+        if self.tablebase.should_use_tablebase(canonicalBoard, time_left):
+            best_move = self.tablebase.get_best_move(canonicalBoard)
+            if best_move:
+                probs = [0] * self.game.getActionSize()
+                probs[self.game.moveToAction(canonicalBoard, best_move)] = 1
+                return probs
+
         for _ in range(self.args.numMCTSSims):
             self.search(canonicalBoard)
 
@@ -44,9 +51,8 @@ class MCTS:
         if self.Es[s] != 0:
             return -self.Es[s]
 
-        # Check if the position is in the endgame tablebase
-        if self.is_endgame_position(canonicalBoard):
-            wdl = self.tablebase.probe_wdl(canonicalBoard)
+        if self.tablebase.should_use_tablebase(canonicalBoard, time_left=None):
+            wdl = self.tablebase.probe_wdl(canonicalBoard.fen())
             if wdl is not None:
                 return -wdl / 2  # Convert to our value range (-1 to 1)
 
@@ -97,8 +103,3 @@ class MCTS:
 
         self.Ns[s] += 1
         return -v
-
-    def is_endgame_position(self, board):
-        # Define what constitutes an endgame position
-        # For example, when there are 7 or fewer pieces on the board
-        return sum(1 for _ in board.pieces()) <= 7

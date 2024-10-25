@@ -5,6 +5,7 @@ import sys
 from collections import deque
 from pickle import Pickler, Unpickler
 from random import shuffle, choice
+import chess
 
 import numpy as np
 from tqdm import tqdm
@@ -28,7 +29,28 @@ class Coach():
         self.endgame_tablebase = EndgameTablebase()
 
     def executeEpisode(self):
-        # ... [previous executeEpisode code remains unchanged]
+        trainExamples = []
+        board = self.game.getInitBoard()
+        self.curPlayer = 1
+        episodeStep = 0
+
+        while True:
+            episodeStep += 1
+            canonicalBoard = self.game.getCanonicalForm(board, self.curPlayer)
+            temp = int(episodeStep < self.args.tempThreshold)
+
+            pi = self.mcts.getActionProb(canonicalBoard, temp=temp, time_left=self.args.moveTime)
+            sym = self.game.getSymmetries(canonicalBoard, pi)
+            for b, p in sym:
+                trainExamples.append([b, self.curPlayer, p, None])
+
+            action = np.random.choice(len(pi), p=pi)
+            board, self.curPlayer = self.game.getNextState(board, self.curPlayer, action)
+
+            r = self.game.getGameEnded(board, self.curPlayer)
+
+            if r != 0:
+                return [(x[0], x[2], r * ((-1) ** (x[1] != self.curPlayer))) for x in trainExamples]
 
     def learn(self):
         for i in range(1, self.args.numIters + 1):
@@ -62,8 +84,8 @@ class Coach():
             nmcts = MCTS(self.game, self.args, self.nnet)
 
             log.info('PITTING AGAINST PREVIOUS VERSION')
-            arena = Arena(lambda x: np.argmax(pmcts.getActionProb(x, temp=0)),
-                          lambda x: np.argmax(nmcts.getActionProb(x, temp=0)), self.game)
+            arena = Arena(lambda x: np.argmax(pmcts.getActionProb(x, temp=0, time_left=self.args.moveTime)),
+                          lambda x: np.argmax(nmcts.getActionProb(x, temp=0, time_left=self.args.moveTime)), self.game)
             pwins, nwins, draws = arena.playGames(self.args.arenaCompare)
 
             log.info('NEW/PREV WINS : %d / %d ; DRAWS : %d' % (nwins, pwins, draws))
@@ -75,7 +97,7 @@ class Coach():
                 self.nnet.save_checkpoint(folder=self.args.checkpoint, filename=self.getCheckpointFile(i))
                 self.nnet.save_checkpoint(folder=self.args.checkpoint, filename='best.pth.tar')
 
-            # New: Endgame tablebase training phase
+            # Endgame tablebase training phase
             if i % self.args.endgameTrainingFrequency == 0:
                 log.info('STARTING ENDGAME TABLEBASE TRAINING PHASE')
                 self.train_from_tablebase()
@@ -84,10 +106,11 @@ class Coach():
         endgame_examples = []
         for _ in range(self.args.numEndgameExamples):
             board = self.generate_random_endgame_position()
-            value = self.endgame_tablebase.probe_wdl(board.fen())
-            if value is not None:
+            wdl = self.endgame_tablebase.probe_wdl(board.fen())
+            if wdl is not None:
                 canonical_board = self.game.getCanonicalForm(board, 1)
-                endgame_examples.append((canonical_board, None, value / 2))  # Normalize value to [-1, 1]
+                pi = self.generate_tablebase_policy(board)
+                endgame_examples.append((canonical_board, pi, wdl / 2))  # Normalize value to [-1, 1]
 
         log.info(f'Generated {len(endgame_examples)} endgame examples')
         self.nnet.train(endgame_examples)
@@ -109,6 +132,21 @@ class Coach():
         board.turn = choice([chess.WHITE, chess.BLACK])
         return board
 
+    def generate_tablebase_policy(self, board):
+        legal_moves = list(board.legal_moves)
+        policy = [0] * self.game.getActionSize()
+        
+        best_move = self.endgame_tablebase.get_best_move(board)
+        if best_move:
+            best_move_index = legal_moves.index(best_move)
+            policy[self.game.moveToAction(board, best_move)] = 1
+        else:
+            # If no best move found, use a uniform distribution over legal moves
+            for move in legal_moves:
+                policy[self.game.moveToAction(board, move)] = 1 / len(legal_moves)
+        
+        return policy
+
     # ... [rest of the Coach class remains unchanged]
 
 if __name__ == "__main__":
@@ -127,9 +165,9 @@ if __name__ == "__main__":
         'load_folder_file': ('/dev/models/8x100x50','best.pth.tar'),
         'numItersForTrainExamplesHistory': 20,
 
-        # New arguments for endgame tablebase training
         'endgameTrainingFrequency': 10,  # Every 10 iterations
         'numEndgameExamples': 10000,  # Number of endgame positions to generate for training
+        'moveTime': 30,  # Time allowed for each move in seconds
     })
 
     game = Game()
