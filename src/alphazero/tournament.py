@@ -1,53 +1,50 @@
 
-import torch
+import tensorflow as tf
 import os
 import argparse
 from tqdm import tqdm
 from .game import Game
-from .model import ChessModel
-from .improved_model import ImprovedChessModel
+from .model import get_model
 from .mcts import MCTS
 import numpy as np
 
-def load_model(model_path, model_class=ImprovedChessModel):
+def load_model(model_path):
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
-    game = Game()
-    model = model_class(board_size=game.board_size, action_size=game.action_size)
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
+    model = get_model()
+    model.load_weights(model_path)
     return model
 
-def play_game(model1, model2, game, num_simulations=100):
-    mcts1 = MCTS(game, model1, num_simulations)
-    mcts2 = MCTS(game, model2, num_simulations)
+def play_game(model1, model2, game, args):
+    mcts1 = MCTS(game, args, model1)
+    mcts2 = MCTS(game, args, model2)
     
-    state = game.get_initial_state()
-    player = 1
+    board = game.getInitBoard()
+    curPlayer = 1
     
-    while not game.is_game_over(state):
-        if player == 1:
-            action = mcts1.get_action(state)
+    while True:
+        if curPlayer == 1:
+            action = np.argmax(mcts1.getActionProb(board, temp=0))
         else:
-            action = mcts2.get_action(state)
+            action = np.argmax(mcts2.getActionProb(board, temp=0))
         
-        state = game.get_next_state(state, action, player)
-        player = -player
-    
-    return game.get_winner(state)
+        board, curPlayer = game.getNextState(board, curPlayer, action)
+        
+        if game.getGameEnded(board, curPlayer) != 0:
+            return game.getGameEnded(board, curPlayer)
 
-def run_tournament(model_paths, num_games=100):
+def run_tournament(model_paths, args):
     game = Game()
     models = [load_model(path) for path in model_paths]
     n = len(models)
     scores = np.zeros((n, n))
     
-    total_games = n * (n - 1) * num_games // 2
+    total_games = n * (n - 1) * args.numGames // 2
     with tqdm(total=total_games, desc="Tournament Progress") as pbar:
         for i in range(n):
             for j in range(i+1, n):
-                for _ in range(num_games // 2):
-                    result = play_game(models[i], models[j], game)
+                for _ in range(args.numGames // 2):
+                    result = play_game(models[i], models[j], game, args)
                     if result == 1:
                         scores[i, j] += 1
                     elif result == -1:
@@ -57,7 +54,7 @@ def run_tournament(model_paths, num_games=100):
                         scores[j, i] += 0.5
                     
                     # Play reverse game
-                    result = play_game(models[j], models[i], game)
+                    result = play_game(models[j], models[i], game, args)
                     if result == 1:
                         scores[j, i] += 1
                     elif result == -1:

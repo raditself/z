@@ -1,44 +1,26 @@
 import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
+import tensorflow as tf
+from tensorflow.keras import layers, models, optimizers
 from chess_dataset import ChessDataset
 import time
 
 def create_model(num_layers, neurons_per_layer, activation_func, dropout_rate):
-    layers = []
+    model = models.Sequential()
     input_size = 64 * 12  # 8x8 board, 12 piece types (6 white, 6 black)
-    for i in range(num_layers):
-        layers.append(nn.Linear(input_size if i == 0 else neurons_per_layer, neurons_per_layer))
-        layers.append(activation_func())
-        layers.append(nn.Dropout(dropout_rate))
-    layers.append(nn.Linear(neurons_per_layer, 1))  # Output layer for evaluation
-    return nn.Sequential(*layers)
+    model.add(layers.Input(shape=(input_size,)))
+    for _ in range(num_layers):
+        model.add(layers.Dense(neurons_per_layer, activation=activation_func))
+        model.add(layers.Dropout(dropout_rate))
+    model.add(layers.Dense(1))  # Output layer for evaluation
+    return model
 
-def train_and_evaluate(model, train_loader, val_loader, epochs=1):
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters())
+def train_and_evaluate(model, train_dataset, val_dataset, epochs=1):
+    model.compile(optimizer='adam', loss='mse')
     
-    for epoch in range(epochs):
-        model.train()
-        for batch in train_loader:
-            inputs, targets = batch
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
+    model.fit(train_dataset, epochs=epochs, validation_data=val_dataset, verbose=0)
     
-    model.eval()
-    total_loss = 0
-    with torch.no_grad():
-        for batch in val_loader:
-            inputs, targets = batch
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            total_loss += loss.item()
-    return total_loss / len(val_loader)
+    results = model.evaluate(val_dataset, verbose=0)
+    return results
 
 def neural_architecture_search(db_path, num_trials=5):
     print("Loading dataset...")
@@ -48,18 +30,17 @@ def neural_architecture_search(db_path, num_trials=5):
 
     # Use only a small subset of the data for testing
     subset_size = min(1000, len(full_dataset))
-    subset_indices = torch.randperm(len(full_dataset))[:subset_size]
-    dataset = Subset(full_dataset, subset_indices)
+    full_dataset = full_dataset.shuffle(buffer_size=len(full_dataset)).take(subset_size)
 
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    train_size = int(0.8 * subset_size)
+    train_dataset = full_dataset.take(train_size)
+    val_dataset = full_dataset.skip(train_size)
 
-    print(f"Train dataset size: {len(train_dataset)}")
-    print(f"Validation dataset size: {len(val_dataset)}")
+    train_dataset = train_dataset.batch(32)
+    val_dataset = val_dataset.batch(32)
 
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32)
+    print(f"Train dataset size: {train_size}")
+    print(f"Validation dataset size: {subset_size - train_size}")
 
     best_model = None
     best_performance = float('inf')
@@ -70,11 +51,11 @@ def neural_architecture_search(db_path, num_trials=5):
 
         num_layers = random.randint(2, 3)
         neurons_per_layer = random.choice([64, 128])
-        activation_func = random.choice([nn.ReLU, nn.LeakyReLU])
+        activation_func = random.choice(['relu', 'leaky_relu'])
         dropout_rate = random.uniform(0, 0.3)
 
         model = create_model(num_layers, neurons_per_layer, activation_func, dropout_rate)
-        performance = train_and_evaluate(model, train_loader, val_loader)
+        performance = train_and_evaluate(model, train_dataset, val_dataset)
 
         print(f"Trial {trial + 1}/{num_trials}: Performance = {performance:.4f}, Time taken: {time.time() - start_time:.2f} seconds")
 
@@ -87,7 +68,7 @@ def neural_architecture_search(db_path, num_trials=5):
 if __name__ == "__main__":
     best_model, best_performance = neural_architecture_search("chess_positions.db")
     print(f"Best model performance: {best_performance}")
-    print(f"Best model architecture: {best_model}")
+    print(f"Best model architecture: {best_model.summary()}")
 
     # Save the best model
-    torch.save(best_model.state_dict(), "best_model.pth")
+    best_model.save('best_model.h5')

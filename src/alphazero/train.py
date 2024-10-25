@@ -8,8 +8,23 @@ from random import shuffle, choice
 import chess
 
 import numpy as np
-import torch
+import tensorflow as tf
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+# Set up the distribution strategy
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        strategy = tf.distribute.MirroredStrategy()
+        print(f'Number of devices: {strategy.num_replicas_in_sync}')
+    except RuntimeError as e:
+        print(e)
+else:
+    strategy = tf.distribute.get_strategy()  # Default strategy
+    print("No GPUs available. Using default strategy.")
 
 from .game import Game
 from .mcts import MCTS
@@ -25,12 +40,26 @@ class Coach():
     def __init__(self, game: Game, args):
         self.game = game
         self.args = args
-        self.nnet = get_model()
-        self.pnet = get_model()  # the competitor network
+        with strategy.scope():
+            self.nnet = get_model()
+            self.pnet = get_model()  # the competitor network
         self.mcts = MCTS(self.game, self.args, self.nnet)
         self.trainExamplesHistory = []
         self.skipFirstSelfPlay = False
         self.endgame_tablebase = EndgameTablebase()
+
+        # Set up checkpointing
+        self.checkpoint_dir = './checkpoints'
+        self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
+        self.checkpoint = tf.train.Checkpoint(model=self.nnet, optimizer=tf.keras.optimizers.Adam())
+        self.manager = tf.train.CheckpointManager(self.checkpoint, self.checkpoint_dir, max_to_keep=3)
+
+        # Restore the latest checkpoint if it exists
+        if self.manager.latest_checkpoint:
+            self.checkpoint.restore(self.manager.latest_checkpoint)
+            print(f"Restored from {self.manager.latest_checkpoint}")
+
+        self.loss_history = []
 
     def executeEpisode(self):
         trainExamples = []
@@ -80,49 +109,104 @@ class Coach():
                 trainExamples.extend(e)
             shuffle(trainExamples)
 
-            # Save current model
-            torch.save(self.nnet.state_dict(), os.path.join(self.args.checkpoint, 'temp.pth.tar'))
-            # Load into previous network
-            self.pnet.load_state_dict(torch.load(os.path.join(self.args.checkpoint, 'temp.pth.tar')))
-            pmcts = MCTS(self.game, self.args, self.pnet)
+        # Save current model
+        save_path = self.manager.save()
+        print(f"Saved checkpoint for step {i}: {save_path}")
+        # Load into previous network
+        self.pnet.set_weights(self.nnet.get_weights())
+        pmcts = MCTS(self.game, self.args, self.pnet)
 
-            self.train(trainExamples)
-            nmcts = MCTS(self.game, self.args, self.nnet)
+        self.train(trainExamples)
+        nmcts = MCTS(self.game, self.args, self.nnet)
 
-            log.info('PITTING AGAINST PREVIOUS VERSION')
-            arena = Arena(lambda x: np.argmax(pmcts.getActionProb(x, temp=0, time_left=self.args.moveTime)),
-                          lambda x: np.argmax(nmcts.getActionProb(x, temp=0, time_left=self.args.moveTime)), self.game)
-            pwins, nwins, draws = arena.playGames(self.args.arenaCompare)
+        log.info('PITTING AGAINST PREVIOUS VERSION')
+        arena = Arena(lambda x: np.argmax(pmcts.getActionProb(x, temp=0, time_left=self.args.moveTime)),
+                      lambda x: np.argmax(nmcts.getActionProb(x, temp=0, time_left=self.args.moveTime)), self.game)
+        pwins, nwins, draws = arena.playGames(self.args.arenaCompare)
 
-            log.info('NEW/PREV WINS : %d / %d ; DRAWS : %d' % (nwins, pwins, draws))
-            if pwins + nwins == 0 or float(nwins) / (pwins + nwins) < self.args.updateThreshold:
-                log.info('REJECTING NEW MODEL')
-                self.nnet.load_state_dict(torch.load(os.path.join(self.args.checkpoint, 'temp.pth.tar')))
-            else:
-                log.info('ACCEPTING NEW MODEL')
-                torch.save(self.nnet.state_dict(), os.path.join(self.args.checkpoint, self.getCheckpointFile(i)))
-                torch.save(self.nnet.state_dict(), os.path.join(self.args.checkpoint, 'best.pth.tar'))
+        log.info('NEW/PREV WINS : %d / %d ; DRAWS : %d' % (nwins, pwins, draws))
+        if pwins + nwins == 0 or float(nwins) / (pwins + nwins) < self.args.updateThreshold:
+            log.info('REJECTING NEW MODEL')
+            self.nnet.set_weights(self.pnet.get_weights())
+        else:
+            log.info('ACCEPTING NEW MODEL')
+            save_path = self.manager.save()
+            print(f"Saved checkpoint for step {i}: {save_path}")
 
-            # Endgame tablebase training phase
-            if i % self.args.endgameTrainingFrequency == 0:
-                log.info('STARTING ENDGAME TABLEBASE TRAINING PHASE')
-                self.train_from_tablebase()
+        # Endgame tablebase training phase
+        if i % self.args.endgameTrainingFrequency == 0:
+            log.info('STARTING ENDGAME TABLEBASE TRAINING PHASE')
+            self.train_from_tablebase()
+
+        self.plot_loss()
 
     def train(self, examples):
-        optimizer = torch.optim.Adam(self.nnet.parameters(), lr=0.001)
-        for epoch in range(self.args.epochs):
-            self.nnet.train()
-            data_loader = get_data_loader(examples, batch_size=self.args.batch_size)
-            for batch_idx, (boards, target_policies, target_values) in enumerate(data_loader):
-                boards, target_policies, target_values = boards.to(self.args.device), target_policies.to(self.args.device), target_values.to(self.args.device)
+        with strategy.scope():
+            initial_learning_rate = 0.001
+            lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+                initial_learning_rate,
+                decay_steps=1000,
+                decay_rate=0.96,
+                staircase=True)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+            loss_fn = tf.keras.losses.CategoricalCrossentropy()
+            
+            @tf.function
+            def train_step(boards, target_policies, target_values):
+                with tf.GradientTape() as tape:
+                    policy_output, value_output = self.nnet(boards, training=True)
+                    policy_loss = loss_fn(target_policies, policy_output)
+                    value_loss = tf.keras.losses.mean_squared_error(target_values, value_output)
+                    total_loss = policy_loss + value_loss
+                grads = tape.gradient(total_loss, self.nnet.trainable_variables)
+                optimizer.apply_gradients(zip(grads, self.nnet.trainable_variables))
+                return total_loss
 
-                optimizer.zero_grad()
-                policy_output, value_output = self.nnet(boards)
-                policy_loss = torch.nn.functional.cross_entropy(policy_output, target_policies)
-                value_loss = torch.nn.functional.mse_loss(value_output.squeeze(), target_values)
-                total_loss = policy_loss + value_loss
-                total_loss.backward()
-                optimizer.step()
+            for epoch in range(self.args.epochs):
+                self.nnet.trainable = True
+                dataset = get_data_loader(examples, batch_size=self.args.batch_size)
+                total_loss = 0
+                num_batches = 0
+                for batch in dataset:
+                    boards, target_policies, target_values = batch
+                    per_replica_losses = strategy.run(train_step, args=(boards, target_policies, target_values))
+                    total_loss += strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses, axis=None)
+                    num_batches += 1
+                avg_loss = total_loss / num_batches
+                self.loss_history.append(avg_loss)
+                current_lr = optimizer._decayed_lr(tf.float32).numpy()
+                log.info(f'Epoch {epoch + 1}/{self.args.epochs}, Loss: {avg_loss:.4f}, LR: {current_lr:.6f}')
+
+                # Save checkpoint after each epoch
+                save_path = self.manager.save()
+                print(f"Saved checkpoint for epoch {epoch+1}: {save_path}")
+
+                # Evaluate model performance periodically
+                if (epoch + 1) % 10 == 0:
+                    self.evaluate_model()
+
+    def evaluate_model(self):
+        num_games = 20
+        opponent = MCTS(self.game, self.args, self.pnet)  # Use previous network as opponent
+        mcts = MCTS(self.game, self.args, self.nnet)
+        arena = Arena(
+            lambda x: np.argmax(mcts.getActionProb(x, temp=0)),
+            lambda x: np.argmax(opponent.getActionProb(x, temp=0)),
+            self.game
+        )
+        wins, losses, draws = arena.playGames(num_games)
+        win_rate = (wins + 0.5 * draws) / num_games
+        log.info(f'Evaluation: Win rate against previous version: {win_rate:.2f} (Wins: {wins}, Losses: {losses}, Draws: {draws})')
+        return win_rate
+
+    def plot_loss(self):
+        plt.figure(figsize=(10, 5))
+        plt.plot(self.loss_history)
+        plt.title('Training Loss Over Time')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.savefig('training_loss.png')
+        plt.close()
 
     def train_from_tablebase(self):
         endgame_examples = []

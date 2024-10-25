@@ -3,6 +3,7 @@ import math
 import numpy as np
 import multiprocessing
 from multiprocessing import Pool
+import tensorflow as tf
 from .game import Game
 from .endgame_tablebase import EndgameTablebase
 
@@ -44,11 +45,11 @@ class MCTS:
         counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.getActionSize())]
 
         if temp == 0:
-            bestAs = np.array(np.argwhere(counts == np.max(counts))).flatten()
-            bestA = np.random.choice(bestAs)
-            probs = [0] * len(counts)
-            probs[bestA] = 1
-            return probs
+            bestAs = tf.where(tf.equal(counts, tf.reduce_max(counts)))
+            bestA = tf.random.shuffle(bestAs)[0]
+            probs = tf.zeros_like(counts)
+            probs = tf.tensor_scatter_nd_update(probs, [[bestA]], [1.0])
+            return probs.numpy()
 
         counts = [x ** (1. / temp) for x in counts]
         counts_sum = float(sum(counts))
@@ -69,7 +70,10 @@ class MCTS:
                 return -wdl / 2  # Convert to our value range (-1 to 1)
 
         if s not in self.Ps:
-            self.Ps[s], v = self.model.predict(canonicalBoard)
+            board_tensor = tf.convert_to_tensor(canonicalBoard, dtype=tf.float32)
+            board_tensor = tf.expand_dims(board_tensor, 0)  # Add batch dimension
+            policy, value = self.model(board_tensor)
+            self.Ps[s], v = policy.numpy()[0], value.numpy()[0][0]
             valids = self.game.getValidMoves(canonicalBoard, 1)
             self.Ps[s] = self.Ps[s] * valids  # masking invalid moves
             sum_Ps_s = np.sum(self.Ps[s])
