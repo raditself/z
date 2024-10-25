@@ -1,59 +1,61 @@
-import numpy as np
-from .game import ChessGame
 
-def analyze_game(game_history):
-    analysis = []
-    current_game = ChessGame()
-    
-    for move_number, move in enumerate(game_history, start=1):
-        current_game.make_move(move)
-        
-        # Analyze every 5th move or the last move
-        if move_number % 5 == 0 or move_number == len(game_history):
-            evaluation = current_game.evaluate()
-            key_position = is_key_position(current_game, evaluation)
-            
-            if key_position:
-                analysis.append({
-                    'move_number': move_number,
-                    'position': current_game.board.copy(),
-                    'evaluation': evaluation,
-                    'suggested_move': get_best_move(current_game)
-                })
-    
-    return analysis
+import chess
+import chess.pgn
+import io
 
-def is_key_position(game, evaluation):
-    # Define criteria for key positions
-    # For example, significant change in evaluation, or critical moments in the game
-    return abs(evaluation) > 300 or game.is_check()
+class GameAnalysis:
+    def __init__(self, ai):
+        self.ai = ai
 
-def get_best_move(game):
-    best_eval = float('-inf') if game.current_player == 1 else float('inf')
-    best_move = None
-    
-    for move in game.get_legal_moves():
-        new_game = game.clone()
-        new_game.make_move(move)
-        eval = new_game.evaluate()
-        
-        if game.current_player == 1:  # White's turn
-            if eval > best_eval:
-                best_eval = eval
-                best_move = move
-        else:  # Black's turn
-            if eval < best_eval:
-                best_eval = eval
-                best_move = move
-    
-    return best_move
+    def load_pgn(self, pgn_string):
+        pgn = io.StringIO(pgn_string)
+        game = chess.pgn.read_game(pgn)
+        return game
 
-def suggest_improvements(analysis):
-    suggestions = []
-    for position in analysis:
-        if position['evaluation'] < -100:  # Disadvantageous position for the current player
-            suggestions.append({
-                'move_number': position['move_number'],
-                'suggestion': f"Consider {position['suggested_move']} instead of the played move."
+    def analyze_game(self, game):
+        board = game.board()
+        analysis = []
+
+        for move in game.mainline_moves():
+            board.push(move)
+            evaluation = self.ai.evaluate_board(board)
+            analysis.append({
+                'move': move,
+                'fen': board.fen(),
+                'evaluation': evaluation
             })
-    return suggestions
+
+        return analysis
+
+    def get_critical_positions(self, analysis, threshold=200):
+        critical_positions = []
+        prev_eval = 0
+
+        for pos in analysis:
+            eval_diff = abs(pos['evaluation'] - prev_eval)
+            if eval_diff > threshold:
+                critical_positions.append(pos)
+            prev_eval = pos['evaluation']
+
+        return critical_positions
+
+    def suggest_improvements(self, game, analysis):
+        board = game.board()
+        improvements = []
+
+        for i, move_analysis in enumerate(analysis):
+            if i % 2 == 0:  # Only analyze player's moves
+                board.push(move_analysis['move'])
+                best_move = self.ai.get_best_move(board)
+                if best_move != move_analysis['move']:
+                    improvements.append({
+                        'move_number': i // 2 + 1,
+                        'player_move': move_analysis['move'],
+                        'suggested_move': best_move,
+                        'evaluation_diff': self.ai.evaluate_board(board) - move_analysis['evaluation']
+                    })
+                board.pop()
+            else:
+                board.push(move_analysis['move'])
+
+        return improvements
