@@ -2,14 +2,22 @@
 import math
 import numpy as np
 from multiprocessing import Pool, cpu_count
+from .opening_book import OpeningBook
 
 class MCTS:
-    def __init__(self, game, model, args):
+    def __init__(self, game, model, args, opening_book=None):
         self.game = game
         self.model = model
         self.args = args
+        self.opening_book = opening_book or OpeningBook()
 
     def search(self, state):
+        # Check opening book first
+        chess_board = self.game.to_chess_board()
+        book_move = self.opening_book.get_move(chess_board)
+        if book_move:
+            return self.chess_move_to_action(book_move), None
+
         root = Node(self.game, state)
         
         # Parallelize the search process
@@ -51,6 +59,13 @@ class MCTS:
         total = sum(visits)
         action_probs = [x / total for x in visits]
         return actions, action_probs
+
+    def chess_move_to_action(self, chess_move):
+        from_square = chess_move.from_square
+        to_square = chess_move.to_square
+        from_row, from_col = 7 - (from_square // 8), from_square % 8
+        to_row, to_col = 7 - (to_square // 8), to_square % 8
+        return from_row * 64 + from_col * 8 + to_row * 8 + to_col
 
 class Node:
     def __init__(self, game, state, parent=None, action=None):

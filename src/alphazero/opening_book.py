@@ -1,32 +1,71 @@
 import random
+import chess
+import chess.pgn
+import io
 
 class OpeningBook:
     def __init__(self):
-        self.openings = {
-            'e2e4': ['e7e5', 'c7c5', 'e7e6', 'c7c6'],  # King's Pawn
-            'e2e4 e7e5': ['g1f3', 'b1c3'],  # King's Pawn Game
-            'e2e4 c7c5': ['g1f3', 'd2d4'],  # Sicilian Defense
-            'e2e4 e7e6': ['d2d4', 'g1f3'],  # French Defense
-            'd2d4': ['d7d5', 'g8f6', 'e7e6'],  # Queen's Pawn
-            'd2d4 d7d5': ['c2c4', 'g1f3'],  # Queen's Gambit
-            'd2d4 g8f6': ['c2c4', 'g1f3'],  # Indian Defense
-        }
+        self.openings = {}
 
-    def get_move(self, move_history):
-        move_string = ' '.join(self.move_to_string(move) for move in move_history)
-        if move_string in self.openings:
-            return self.string_to_move(random.choice(self.openings[move_string]))
+    def add_opening(self, moves):
+        board = chess.Board()
+        key = board.fen()
+        for move in moves:
+            if key not in self.openings:
+                self.openings[key] = []
+            self.openings[key].append(move)
+            board.push_san(move)
+            key = board.fen()
+
+    def get_move(self, board):
+        key = board.fen()
+        if key in self.openings:
+            return random.choice(self.openings[key])
         return None
 
-    @staticmethod
-    def move_to_string(move):
-        from_row, from_col, to_row, to_col = move
-        return f"{chr(97+from_col)}{8-from_row}{chr(97+to_col)}{8-to_row}"
+    def load_from_pgn(self, pgn_file):
+        with open(pgn_file) as f:
+            while True:
+                game = chess.pgn.read_game(f)
+                if game is None:
+                    break
+                moves = [move.san() for move in game.mainline_moves()]
+                self.add_opening(moves[:10])  # Add first 10 moves of each game
 
-    @staticmethod
-    def string_to_move(move_string):
-        from_col = ord(move_string[0]) - 97
-        from_row = 8 - int(move_string[1])
-        to_col = ord(move_string[2]) - 97
-        to_row = 8 - int(move_string[3])
-        return (from_row, from_col, to_row, to_col)
+    def load_from_eco(self, eco_file):
+        with open(eco_file, 'r') as f:
+            for line in f:
+                parts = line.strip().split('"')
+                if len(parts) >= 4:
+                    moves = parts[3].split()
+                    self.add_opening(moves)
+
+def create_sample_opening_book():
+    book = OpeningBook()
+    
+    # Add some common openings
+    book.add_opening(["e4", "e5", "Nf3", "Nc6", "Bb5"])  # Ruy Lopez
+    book.add_opening(["e4", "e5", "Nf3", "Nc6", "Bc4"])  # Italian Game
+    book.add_opening(["d4", "d5", "c4"])  # Queen's Gambit
+    book.add_opening(["e4", "c5"])  # Sicilian Defense
+    book.add_opening(["e4", "e6"])  # French Defense
+    
+    return book
+
+# Usage example
+if __name__ == "__main__":
+    book = create_sample_opening_book()
+    
+    # Test the opening book
+    board = chess.Board()
+    for _ in range(3):
+        move = book.get_move(board)
+        if move:
+            print(f"Suggested move: {move}")
+            board.push_san(move)
+        else:
+            print("No move found in opening book")
+            break
+    
+    print("Final position:")
+    print(board)

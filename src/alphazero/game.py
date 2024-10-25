@@ -1,6 +1,7 @@
 
 import numpy as np
 import copy
+import chess
 from .chess_timer import ChessTimer
 from .chess_variants import setup_chess960_board
 
@@ -16,6 +17,40 @@ class ChessGame:
         self.move_history = []
         self.action_size = 64 * 64  # All possible moves from any square to any square
         self.timer = ChessTimer(initial_time, increment)
+        if self.variant == 'crazyhouse':
+            self.piece_reserve = {1: {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}, -1: {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}}
+
+    def to_chess_board(self):
+        chess_board = chess.Board(fen=None)
+        chess_board.clear()
+        for i in range(8):
+            for j in range(8):
+                piece = self.board[i][j][0]
+                if piece != 0:
+                    color = chess.WHITE if piece > 0 else chess.BLACK
+                    piece_type = abs(piece)
+                    chess_piece = None
+                    if piece_type == 1:
+                        chess_piece = chess.PAWN
+                    elif piece_type == 2:
+                        chess_piece = chess.KNIGHT
+                    elif piece_type == 3:
+                        chess_piece = chess.BISHOP
+                    elif piece_type == 4:
+                        chess_piece = chess.ROOK
+                    elif piece_type == 5:
+                        chess_piece = chess.QUEEN
+                    elif piece_type == 6:
+                        chess_piece = chess.KING
+                    chess_board.set_piece_at(chess.square(j, 7-i), chess.Piece(chess_piece, color))
+        
+        chess_board.turn = chess.WHITE if self.current_player == 1 else chess.BLACK
+        chess_board.castling_rights = chess.CASTLING_RIGHTS[(self.castling_rights['K'], self.castling_rights['Q'], self.castling_rights['k'], self.castling_rights['q'])]
+        chess_board.ep_square = chess.parse_square(self.en_passant_target) if self.en_passant_target else None
+        chess_board.halfmove_clock = self.halfmove_clock
+        chess_board.fullmove_number = self.fullmove_number
+        
+        return chess_board
 
     def clone(self):
         new_game = ChessGame(variant=self.variant)
@@ -25,6 +60,8 @@ class ChessGame:
         new_game.en_passant_target = self.en_passant_target
         new_game.halfmove_clock = self.halfmove_clock
         new_game.fullmove_number = self.fullmove_number
+        if self.variant == 'crazyhouse':
+            new_game.piece_reserve = copy.deepcopy(self.piece_reserve)
         return new_game
 
     def evaluate(self):
@@ -58,10 +95,16 @@ class ChessGame:
                         else:  # Late game
                             score += (3.5 - abs(i - 3.5) - abs(j - 3.5)) * 10 * np.sign(piece)  # King should be active in the endgame
         
+        # Add score for pieces in reserve (for crazyhouse variant)
+        if self.variant == 'crazyhouse':
+            for color in [1, -1]:
+                for piece, count in self.piece_reserve[color].items():
+                    score += piece_values[piece] * count * color
+        
         return score if self.current_player == 1 else -score
 
     def init_board(self):
-        if self.variant == 'standard':
+        if self.variant in ['standard', 'crazyhouse']:
             # Initialize the chess board
             board = np.zeros((8, 8, 6), dtype=np.int8)
             # Set up initial positions (simplified for this example)
@@ -75,6 +118,20 @@ class ChessGame:
         else:
             raise ValueError(f"Unsupported chess variant: {self.variant}")
         return board
+
+    def _get_drop_moves(self):
+        drop_moves = []
+        for i in range(8):
+            for j in range(8):
+                if self.board[i][j][0] == 0:  # Empty square
+                    for piece_type, count in self.piece_reserve[self.current_player].items():
+                        if count > 0:
+                            if piece_type == 1:  # Pawn
+                                if i != 0 and i != 7:  # Pawns can't be dropped on the first or last rank
+                                    drop_moves.append((None, (i, j), piece_type))
+                            else:
+                                drop_moves.append((None, (i, j), piece_type))
+        return drop_moves
 
     def get_legal_moves(self):
         legal_moves = []
@@ -94,6 +151,10 @@ class ChessGame:
                         legal_moves.extend(self._get_queen_moves(i, j))
                     elif abs(piece[0]) == 6:  # King
                         legal_moves.extend(self._get_king_moves(i, j))
+        
+        if self.variant == 'crazyhouse':
+            legal_moves.extend(self._get_drop_moves())
+        
         return legal_moves
 
     def _get_sliding_moves(self, row, col, directions):
@@ -418,3 +479,14 @@ class ChessGame:
                         return True
 
         return False
+
+    def get_result(self):
+        if self.is_checkmate():
+            return "0-1" if self.current_player == 1 else "1-0"
+        elif self.is_stalemate() or self.is_draw_by_insufficient_material() or self.is_draw_by_repetition() or self.is_draw_by_fifty_move_rule():
+            return "1/2-1/2"
+        elif self.timer.is_flag_fallen('white'):
+            return "0-1"
+        elif self.timer.is_flag_fallen('black'):
+            return "1-0"
+        return None
