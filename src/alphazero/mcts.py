@@ -1,111 +1,104 @@
 
 import math
 import numpy as np
-from multiprocessing import Pool, cpu_count
-from .opening_book import OpeningBook
+from .game import Game
+from .endgame_tablebase import EndgameTablebase
 
 class MCTS:
-    def __init__(self, game, model, args, opening_book=None):
+    def __init__(self, game: Game, args, model):
         self.game = game
-        self.model = model
         self.args = args
-        self.opening_book = opening_book or OpeningBook()
+        self.model = model
+        self.Qsa = {}  # stores Q values for s,a
+        self.Nsa = {}  # stores #times edge s,a was visited
+        self.Ns = {}   # stores #times board s was visited
+        self.Ps = {}   # stores initial policy (returned by neural net)
+        self.Es = {}   # stores game.getGameEnded ended for board s
+        self.Vs = {}   # stores game.getValidMoves for board s
+        self.tablebase = EndgameTablebase()
 
-    def search(self, state):
-        # Check opening book first
-        chess_board = self.game.to_chess_board()
-        book_move = self.opening_book.get_move(chess_board)
-        if book_move:
-            return self.chess_move_to_action(book_move), None
+    def getActionProb(self, canonicalBoard, temp=1):
+        for _ in range(self.args.numMCTSSims):
+            self.search(canonicalBoard)
 
-        root = Node(self.game, state)
-        
-        # Parallelize the search process
-        with Pool(processes=cpu_count()) as pool:
-            for _ in range(self.args.num_simulations // cpu_count()):
-                leaf_nodes = pool.map(self.simulate, [root] * cpu_count())
-                
-                for leaf in leaf_nodes:
-                    self.backpropagate(leaf)
+        s = self.game.stringRepresentation(canonicalBoard)
+        counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.getActionSize())]
 
-        return self.get_action_probs(root)
+        if temp == 0:
+            bestAs = np.array(np.argwhere(counts == np.max(counts))).flatten()
+            bestA = np.random.choice(bestAs)
+            probs = [0] * len(counts)
+            probs[bestA] = 1
+            return probs
 
-    def simulate(self, node):
-        while not node.is_leaf():
-            node = node.select_child()
-        
-        value = self.game.get_game_ended(node.state)
-        if value is None:
-            node.expand(self.model)
-            value = node.value
-        
-        return node
+        counts = [x ** (1. / temp) for x in counts]
+        counts_sum = float(sum(counts))
+        probs = [x / counts_sum for x in counts]
+        return probs
 
-    def backpropagate(self, node):
-        while node is not None:
-            node.update(node.value)
-            node = node.parent
+    def search(self, canonicalBoard):
+        s = self.game.stringRepresentation(canonicalBoard)
 
-    def get_action_probs(self, root, temperature=1):
-        visits = [child.visit_count for child in root.children]
-        actions = [child.action for child in root.children]
-        if temperature == 0:
-            action_idx = np.argmax(visits)
-            action_probs = [0] * len(actions)
-            action_probs[action_idx] = 1
-            return actions, action_probs
-        
-        visits = [x ** (1. / temperature) for x in visits]
-        total = sum(visits)
-        action_probs = [x / total for x in visits]
-        return actions, action_probs
+        if s not in self.Es:
+            self.Es[s] = self.game.getGameEnded(canonicalBoard, 1)
+        if self.Es[s] != 0:
+            return -self.Es[s]
 
-    def chess_move_to_action(self, chess_move):
-        from_square = chess_move.from_square
-        to_square = chess_move.to_square
-        from_row, from_col = 7 - (from_square // 8), from_square % 8
-        to_row, to_col = 7 - (to_square // 8), to_square % 8
-        return from_row * 64 + from_col * 8 + to_row * 8 + to_col
+        # Check if the position is in the endgame tablebase
+        if self.is_endgame_position(canonicalBoard):
+            wdl = self.tablebase.probe_wdl(canonicalBoard)
+            if wdl is not None:
+                return -wdl / 2  # Convert to our value range (-1 to 1)
 
-class Node:
-    def __init__(self, game, state, parent=None, action=None):
-        self.game = game
-        self.state = state
-        self.parent = parent
-        self.action = action
-        self.children = []
-        self.visit_count = 0
-        self.value = 0
-        self.prior = 0
+        if s not in self.Ps:
+            self.Ps[s], v = self.model.predict(canonicalBoard)
+            valids = self.game.getValidMoves(canonicalBoard, 1)
+            self.Ps[s] = self.Ps[s] * valids  # masking invalid moves
+            sum_Ps_s = np.sum(self.Ps[s])
+            if sum_Ps_s > 0:
+                self.Ps[s] /= sum_Ps_s  # renormalize
+            else:
+                print("All valid moves were masked, do workaround.")
+                self.Ps[s] = self.Ps[s] + valids
+                self.Ps[s] /= np.sum(self.Ps[s])
 
-    def is_leaf(self):
-        return len(self.children) == 0
+            self.Vs[s] = valids
+            self.Ns[s] = 0
+            return -v
 
-    def select_child(self):
-        c_puct = 1.0
-        
-        def ucb_score(child):
-            u = c_puct * child.prior * math.sqrt(self.visit_count) / (1 + child.visit_count)
-            return child.value + u
+        valids = self.Vs[s]
+        cur_best = -float('inf')
+        best_act = -1
 
-        return max(self.children, key=ucb_score)
+        for a in range(self.game.getActionSize()):
+            if valids[a]:
+                if (s, a) in self.Qsa:
+                    u = self.Qsa[(s, a)] + self.args.cpuct * self.Ps[s][a] * math.sqrt(self.Ns[s]) / (
+                            1 + self.Nsa[(s, a)])
+                else:
+                    u = self.args.cpuct * self.Ps[s][a] * math.sqrt(self.Ns[s] + self.args.EPS)
 
-    def expand(self, model):
-        policy, value = model.predict(self.state)
-        valid_moves = self.game.get_valid_moves(self.state)
-        policy = policy * valid_moves  # mask invalid moves
-        policy /= np.sum(policy)
-        
-        for action, prob in enumerate(policy):
-            if valid_moves[action]:
-                child_state = self.game.get_next_state(self.state, action)
-                child = Node(self.game, child_state, parent=self, action=action)
-                child.prior = prob
-                self.children.append(child)
-        
-        self.value = value
+                if u > cur_best:
+                    cur_best = u
+                    best_act = a
 
-    def update(self, value):
-        self.visit_count += 1
-        self.value += (value - self.value) / self.visit_count
+        a = best_act
+        next_s, next_player = self.game.getNextState(canonicalBoard, 1, a)
+        next_s = self.game.getCanonicalForm(next_s, next_player)
 
+        v = self.search(next_s)
+
+        if (s, a) in self.Qsa:
+            self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / (self.Nsa[(s, a)] + 1)
+            self.Nsa[(s, a)] += 1
+        else:
+            self.Qsa[(s, a)] = v
+            self.Nsa[(s, a)] = 1
+
+        self.Ns[s] += 1
+        return -v
+
+    def is_endgame_position(self, board):
+        # Define what constitutes an endgame position
+        # For example, when there are 7 or fewer pieces on the board
+        return sum(1 for _ in board.pieces()) <= 7
