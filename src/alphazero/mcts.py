@@ -1,6 +1,8 @@
 
 import math
 import numpy as np
+import multiprocessing
+from multiprocessing import Pool
 from .game import Game
 from .endgame_tablebase import EndgameTablebase
 
@@ -16,6 +18,17 @@ class MCTS:
         self.Es = {}   # stores game.getGameEnded ended for board s
         self.Vs = {}   # stores game.getValidMoves for board s
         self.tablebase = EndgameTablebase()
+        self.pool = Pool(processes=multiprocessing.cpu_count())
+
+    def __del__(self):
+        self.pool.close()
+        self.pool.join()
+
+    def parallel_search(self, canonicalBoard):
+        results = self.pool.map(self.search, [canonicalBoard] * self.args.numMCTSSims)
+        for v in results:
+            s = self.game.stringRepresentation(canonicalBoard)
+            self.Ns[s] += 1
 
     def getActionProb(self, canonicalBoard, temp=1, time_left=None):
         if self.tablebase.should_use_tablebase(canonicalBoard, time_left):
@@ -25,8 +38,7 @@ class MCTS:
                 probs[self.game.moveToAction(canonicalBoard, best_move)] = 1
                 return probs
 
-        for _ in range(self.args.numMCTSSims):
-            self.search(canonicalBoard)
+        self.parallel_search(canonicalBoard)
 
         s = self.game.stringRepresentation(canonicalBoard)
         counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.getActionSize())]

@@ -8,21 +8,25 @@ from random import shuffle, choice
 import chess
 
 import numpy as np
+import torch
 from tqdm import tqdm
 
 from .game import Game
 from .mcts import MCTS
-from .neural_architecture_search import NeuralArchitectureSearch
+from .model import get_model, get_data_loader
 from .endgame_tablebase import EndgameTablebase
+from .arena import Arena
+from .utils import dotdict
+from .neural_architecture_search import NeuralArchitectureSearch
 
 log = logging.getLogger(__name__)
 
 class Coach():
-    def __init__(self, game: Game, nnet, args):
+    def __init__(self, game: Game, args):
         self.game = game
-        self.nnet = nnet
-        self.pnet = self.nnet.__class__(self.game)  # the competitor network
         self.args = args
+        self.nnet = get_model()
+        self.pnet = get_model()  # the competitor network
         self.mcts = MCTS(self.game, self.args, self.nnet)
         self.trainExamplesHistory = []
         self.skipFirstSelfPlay = False
@@ -76,11 +80,13 @@ class Coach():
                 trainExamples.extend(e)
             shuffle(trainExamples)
 
-            self.nnet.save_checkpoint(folder=self.args.checkpoint, filename='temp.pth.tar')
-            self.pnet.load_checkpoint(folder=self.args.checkpoint, filename='temp.pth.tar')
+            # Save current model
+            torch.save(self.nnet.state_dict(), os.path.join(self.args.checkpoint, 'temp.pth.tar'))
+            # Load into previous network
+            self.pnet.load_state_dict(torch.load(os.path.join(self.args.checkpoint, 'temp.pth.tar')))
             pmcts = MCTS(self.game, self.args, self.pnet)
 
-            self.nnet.train(trainExamples)
+            self.train(trainExamples)
             nmcts = MCTS(self.game, self.args, self.nnet)
 
             log.info('PITTING AGAINST PREVIOUS VERSION')
@@ -91,16 +97,32 @@ class Coach():
             log.info('NEW/PREV WINS : %d / %d ; DRAWS : %d' % (nwins, pwins, draws))
             if pwins + nwins == 0 or float(nwins) / (pwins + nwins) < self.args.updateThreshold:
                 log.info('REJECTING NEW MODEL')
-                self.nnet.load_checkpoint(folder=self.args.checkpoint, filename='temp.pth.tar')
+                self.nnet.load_state_dict(torch.load(os.path.join(self.args.checkpoint, 'temp.pth.tar')))
             else:
                 log.info('ACCEPTING NEW MODEL')
-                self.nnet.save_checkpoint(folder=self.args.checkpoint, filename=self.getCheckpointFile(i))
-                self.nnet.save_checkpoint(folder=self.args.checkpoint, filename='best.pth.tar')
+                torch.save(self.nnet.state_dict(), os.path.join(self.args.checkpoint, self.getCheckpointFile(i)))
+                torch.save(self.nnet.state_dict(), os.path.join(self.args.checkpoint, 'best.pth.tar'))
 
             # Endgame tablebase training phase
             if i % self.args.endgameTrainingFrequency == 0:
                 log.info('STARTING ENDGAME TABLEBASE TRAINING PHASE')
                 self.train_from_tablebase()
+
+    def train(self, examples):
+        optimizer = torch.optim.Adam(self.nnet.parameters(), lr=0.001)
+        for epoch in range(self.args.epochs):
+            self.nnet.train()
+            data_loader = get_data_loader(examples, batch_size=self.args.batch_size)
+            for batch_idx, (boards, target_policies, target_values) in enumerate(data_loader):
+                boards, target_policies, target_values = boards.to(self.args.device), target_policies.to(self.args.device), target_values.to(self.args.device)
+
+                optimizer.zero_grad()
+                policy_output, value_output = self.nnet(boards)
+                policy_loss = torch.nn.functional.cross_entropy(policy_output, target_policies)
+                value_loss = torch.nn.functional.mse_loss(value_output.squeeze(), target_values)
+                total_loss = policy_loss + value_loss
+                total_loss.backward()
+                optimizer.step()
 
     def train_from_tablebase(self):
         endgame_examples = []
