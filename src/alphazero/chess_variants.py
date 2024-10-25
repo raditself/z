@@ -1,6 +1,20 @@
 
 import random
 
+class StandardChess:
+    def __init__(self):
+        self.board_size = 8
+        self.initial_state = [
+            ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+        ]
+
 def generate_chess960_position():
     # Place bishops
     light_square_bishop = random.randint(0, 3) * 2
@@ -84,6 +98,50 @@ class GrandChess:
         # 'c' represents Chancellor (Rook + Knight)
         # 'a' represents Archbishop (Bishop + Knight)
 
+class ThreeCheckChess:
+    def __init__(self):
+        self.board_size = 8
+        self.initial_state = [
+            ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+        ]
+        self.check_count = {'white': 0, 'black': 0}
+
+    def is_game_over(self):
+        return self.check_count['white'] >= 3 or self.check_count['black'] >= 3
+
+class KingOfTheHillChess:
+    def __init__(self):
+        self.board_size = 8
+        self.initial_state = [
+            ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+            ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['.', '.', '.', '.', '.', '.', '.', '.'],
+            ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+            ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+        ]
+        self.center_squares = [(3, 3), (3, 4), (4, 3), (4, 4)]
+
+    def is_game_over(self):
+        for square in self.center_squares:
+            if self.initial_state[square[0]][square[1]] in ['K', 'k']:
+                return True
+        return False
+
+class Chess960:
+    def __init__(self):
+        self.board_size = 8
+        self.initial_state = setup_chess960_board()
+
 def get_chess_variant(variant_name):
     if variant_name == 'standard':
         return StandardChess()
@@ -91,5 +149,11 @@ def get_chess_variant(variant_name):
         return MiniChess()
     elif variant_name == 'grand':
         return GrandChess()
+    elif variant_name == 'three_check':
+        return ThreeCheckChess()
+    elif variant_name == 'king_of_the_hill':
+        return KingOfTheHillChess()
+    elif variant_name == 'chess960':
+        return Chess960()
     else:
         raise ValueError("Unknown chess variant: " + str(variant_name))

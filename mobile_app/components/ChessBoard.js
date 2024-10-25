@@ -7,10 +7,14 @@ import { makeMove } from './ChessAPI';
 const BOARD_SIZE = 8;
 const SQUARE_SIZE = 40;
 
-const ChessBoard = () => {
+const ChessBoard = ({ difficulty }) => {
   const [game, setGame] = useState(new Chess());
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [isThinking, setIsThinking] = useState(false);
+
+  useEffect(() => {
+    console.log(`Difficulty set to: ${difficulty}`);
+  }, [difficulty]);
 
   const renderSquare = (row, col) => {
     const isBlack = (row + col) % 2 === 1;
@@ -47,7 +51,7 @@ const ChessBoard = () => {
         setIsThinking(true);
         
         try {
-          const result = await makeMove(game.fen(), move.san);
+          const result = await makeMove(game.fen(), move.san, difficulty);
           if (result) {
             game.move(result.ai_move);
             setGame(new Chess(game.fen()));

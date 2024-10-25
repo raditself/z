@@ -82,3 +82,123 @@ class Checkers:
     def __str__(self):
         symbols = {0: '.', 1: 'x', 2: 'o'}
         return '\n'.join(' '.join(symbols[piece] for piece in row) for row in self.board)
+
+    def evaluate_position(self):
+        if self.is_game_over():
+            winner = self.get_winner()
+            if winner == 1:
+                return 1000
+            elif winner == 2:
+                return -1000
+            else:
+                return 0
+
+        piece_count = np.sum(self.board == 1) - np.sum(self.board == 2)
+        king_count = np.sum(self.board == 3) - np.sum(self.board == 4)  # Assuming 3 for player 1 kings, 4 for player 2 kings
+
+        # Evaluate piece positioning
+        player1_positions = np.argwhere(self.board == 1)
+        player2_positions = np.argwhere(self.board == 2)
+        player1_avg_rank = np.mean(player1_positions[:, 0]) if len(player1_positions) > 0 else 0
+        player2_avg_rank = np.mean(player2_positions[:, 0]) if len(player2_positions) > 0 else 0
+        position_score = player2_avg_rank - player1_avg_rank  # Player 1 wants to minimize this, Player 2 wants to maximize
+
+        # Control of key squares (corners and center)
+        key_squares = [(0, 0), (0, 7), (7, 0), (7, 7), (3, 3), (3, 4), (4, 3), (4, 4)]
+        key_square_control = sum(self.board[r, c] == 1 for r, c in key_squares) - sum(self.board[r, c] == 2 for r, c in key_squares)
+
+        # Mobility (number of legal moves)
+        current_player_moves = len(self.get_valid_moves())
+        self.current_player = 3 - self.current_player
+        opponent_moves = len(self.get_valid_moves())
+        self.current_player = 3 - self.current_player
+        mobility = current_player_moves - opponent_moves
+
+        # Combine all factors with appropriate weights
+        evaluation = (
+            3 * piece_count +
+            5 * king_count +
+            0.5 * position_score +
+            2 * key_square_control +
+            0.1 * mobility
+        )
+
+        return evaluation if self.current_player == 1 else -evaluation
+
+    def get_dynamic_search_depth(self, base_depth=4):
+        # Count the number of pieces on the board
+        total_pieces = np.sum(self.board != 0)
+        
+        # Adjust depth based on the number of pieces
+        if total_pieces > 16:
+            depth = base_depth
+        elif total_pieces > 12:
+            depth = base_depth + 1
+        elif total_pieces > 8:
+            depth = base_depth + 2
+        else:
+            depth = base_depth + 3
+
+        # Adjust depth based on the phase of the game
+        moves_played = np.sum(self.board == 0) - 32  # Assuming 32 empty squares at the start
+        if moves_played < 10:
+            depth = min(depth, max(base_depth - 1, 3))  # Reduce depth in the opening, but not below 3
+        
+        # Adjust depth based on the current evaluation
+        current_eval = abs(self.evaluate_position())
+        if current_eval > 500:  # If one side has a significant advantage
+            depth = min(depth, base_depth - 1)  # Reduce depth to speed up inevitable win/loss
+        
+        return depth
+
+import time
+
+class CheckersAI:
+    def __init__(self, game, max_time=5):
+        self.game = game
+        self.max_time = max_time
+
+    def get_best_move(self):
+        start_time = time.time()
+        best_move = None
+        depth = 1
+
+        while time.time() - start_time < self.max_time:
+            move, _ = self.minimax(depth, float('-inf'), float('inf'), True, start_time)
+            if move is not None:
+                best_move = move
+            depth += 1
+
+        return best_move
+
+    def minimax(self, depth, alpha, beta, maximizing_player, start_time):
+        if depth == 0 or self.game.is_game_over() or time.time() - start_time > self.max_time:
+            return None, self.game.evaluate_position()
+
+        best_move = None
+        if maximizing_player:
+            max_eval = float('-inf')
+            for move in self.game.get_valid_moves():
+                self.game.make_move(move)
+                _, eval = self.minimax(depth - 1, alpha, beta, False, start_time)
+                self.game.undo_move(move)
+                if eval > max_eval:
+                    max_eval = eval
+                    best_move = move
+                alpha = max(alpha, eval)
+                if beta <= alpha:
+                    break
+            return best_move, max_eval
+        else:
+            min_eval = float('inf')
+            for move in self.game.get_valid_moves():
+                self.game.make_move(move)
+                _, eval = self.minimax(depth - 1, alpha, beta, True, start_time)
+                self.game.undo_move(move)
+                if eval < min_eval:
+                    min_eval = eval
+                    best_move = move
+                beta = min(beta, eval)
+                if beta <= alpha:
+                    break
+            return best_move, min_eval
