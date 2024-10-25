@@ -1,0 +1,83 @@
+Game result: Player -1
+Total moves: 79
+
+Move log:
+Move 1: Player 1 moved Regular piece from (2, 1) to (3, 0). No capture. No promotion
+Move 2: Player -1 moved Regular piece from (5, 0) to (4, 1). No capture. No promotion
+Move 3: Player 1 moved Regular piece from (2, 3) to (3, 2). No capture. No promotion
+Move 4: Player -1 moved Regular piece from (5, 2) to (3, 0). Captured: [(4, 1)]. No promotion
+Move 5: Player 1 moved Regular piece from (1, 0) to (2, 1). No capture. No promotion
+Move 6: Player -1 moved Regular piece from (5, 4) to (4, 3). No capture. No promotion
+Move 7: Player 1 moved Regular piece from (2, 5) to (3, 4). No capture. No promotion
+Move 8: Player -1 moved Regular piece from (6, 3) to (5, 2). No capture. No promotion
+Move 9: Player 1 moved Regular piece from (3, 2) to (5, 4). Captured: [(4, 3)]. No promotion
+Move 10: Player -1 moved Regular piece from (6, 5) to (4, 3). Captured: [(5, 4)]. No promotion
+Move 11: Player 1 moved Regular piece from (1, 2) to (2, 3). No capture. No promotion
+Move 12: Player -1 moved Regular piece from (5, 6) to (4, 5). No capture. No promotion
+Move 13: Player 1 moved Regular piece from (0, 3) to (1, 2). No capture. No promotion
+Move 14: Player -1 moved Regular piece from (6, 1) to (5, 0). No capture. No promotion
+Move 15: Player 1 moved Regular piece from (2, 7) to (3, 6). No capture. No promotion
+Move 16: Player -1 moved Regular piece from (7, 0) to (6, 1). No capture. No promotion
+Move 17: Player 1 moved Regular piece from (1, 6) to (2, 5). No capture. No promotion
+Move 18: Player -1 moved Regular piece from (3, 0) to (1, 2). Captured: [(2, 1)]. No promotion
+Move 19: Player 1 moved Regular piece from (0, 1) to (2, 3). Captured: [(1, 2)]. No promotion
+Move 20: Player -1 moved Regular piece from (7, 2) to (6, 3). No capture. No promotion
+Move 21: Player 1 moved Regular piece from (3, 4) to (4, 5). No capture. No promotion
+Move 22: Player -1 moved Regular piece from (5, 2) to (3, 4). Captured: [(4, 3)]. No promotion
+Move 23: Player 1 moved Regular piece from (2, 3) to (3, 2). No capture. No promotion
+Move 24: Player -1 moved Regular piece from (6, 3) to (5, 4). No capture. No promotion
+Move 25: Player 1 moved Regular piece from (1, 4) to (2, 3). No capture. No promotion
+Move 26: Player -1 moved Regular piece from (7, 4) to (6, 3). No capture. No promotion
+Move 27: Player 1 moved Regular piece from (0, 5) to (1, 4). No capture. No promotion
+Move 28: Player -1 moved Regular piece from (3, 4) to (1, 6). Captured: [(2, 5)]. No promotion
+Move 29: Player 1 moved Regular piece from (0, 7) to (2, 5). Captured: [(1, 6)]. No promotion
+Move 30: Player -1 moved Regular piece from (5, 0) to (4, 1). No capture. No promotion
+Move 31: Player 1 moved Regular piece from (3, 6) to (4, 7). No capture. No promotion
+Move 32: Player -1 moved Regular piece from (7, 6) to (6, 5). No capture. No promotion
+Move 33: Player 1 moved Regular piece from (2, 5) to (3, 4). No capture. No promotion
+Move 34: Player -1 moved Regular piece from (5, 4) to (3, 2). Captured: [(4, 3)]. No promotion
+Move 35: Player 1 moved Regular piece from (3, 4) to (4, 3). No capture. No promotion
+Move 36: Player -1 moved Regular piece from (6, 1) to (5, 2). No capture. No promotion
+Move 37: Player 1 moved Regular piece from (4, 3) to (6, 1). Captured: [(5, 2)]. No promotion
+Move 38: Player -1 moved Regular piece from (7, 0) to (6, 1). No capture. No promotion
+Move 39: Player 1 moved Regular piece from (2, 3) to (3, 2). No capture. No promotion
+Move 40: Player -1 moved Regular piece from (4, 1) to (3, 0). No capture. No promotion
+Move 41: Player 1 moved Regular piece from (1, 4) to (2, 3). No capture. No promotion
+Move 42: Player -1 moved Regular piece from (3, 2) to (1, 4). Captured: [(2, 3)]. No promotion
+Move 43: Player 1 moved Regular piece from (3, 2) to (5, 4). Captured: [(4, 3)]. No promotion
+Move 44: Player -1 moved Regular piece from (6, 5) to (4, 3). Captured: [(5, 4)]. No promotion
+Move 45: Player 1 moved Regular piece from (4, 5) to (6, 3). Captured: [(5, 4)]. No promotion
+Move 46: Player -1 moved Regular piece from (6, 1) to (5, 2). No capture. No promotion
+Move 47: Player 1 moved Regular piece from (6, 3) to (7, 2). No capture. No promotion
+Move 48: Player -1 moved Regular piece from (3, 0) to (2, 1). No capture. No promotion
+Move 49: Player 1 moved Regular piece from (7, 2) to (6, 1). No capture. No promotion
+Move 50: Player -1 moved Regular piece from (4, 3) to (3, 2). No capture. No promotion
+Move 51: Player 1 moved Regular piece from (6, 1) to (7, 0). No capture. No promotion
+Move 52: Player -1 moved Regular piece from (5, 2) to (4, 3). No capture. No promotion
+Move 53: Player 1 moved Regular piece from (4, 7) to (5, 6). No capture. No promotion
+Move 54: Player -1 moved Regular piece from (1, 4) to (0, 3). No capture. No promotion
+Move 55: Player 1 moved Regular piece from (5, 6) to (6, 7). No capture. No promotion
+Move 56: Player -1 moved Regular piece from (2, 1) to (1, 0). No capture. No promotion
+Move 57: Player 1 moved Regular piece from (6, 7) to (7, 6). No capture. No promotion
+Move 58: Player -1 moved Regular piece from (3, 2) to (1, 0). Captured: [(2, 1)]. No promotion
+Move 59: Player 1 moved Regular piece from (7, 6) to (6, 5). No capture. No promotion
+Move 60: Player -1 moved Regular piece from (4, 3) to (3, 4). No capture. No promotion
+Move 61: Player 1 moved Regular piece from (6, 5) to (7, 4). No capture. No promotion
+Move 62: Player -1 moved Regular piece from (3, 4) to (2, 3). No capture. No promotion
+Move 63: Player 1 moved Regular piece from (7, 4) to (6, 3). No capture. No promotion
+Move 64: Player -1 moved Regular piece from (2, 3) to (1, 4). No capture. No promotion
+Move 65: Player 1 moved Regular piece from (6, 3) to (7, 2). No capture. No promotion
+Move 66: Player -1 moved Regular piece from (1, 4) to (0, 5). No capture. No promotion
+Move 67: Player 1 moved Regular piece from (7, 2) to (6, 1). No capture. No promotion
+Move 68: Player -1 moved Regular piece from (1, 0) to (0, 1). No capture. No promotion
+Move 69: Player 1 moved Regular piece from (6, 1) to (7, 0). No capture. No promotion
+Move 70: Player -1 moved Regular piece from (0, 3) to (1, 2). No capture. No promotion
+Move 71: Player 1 moved Regular piece from (7, 0) to (6, 1). No capture. No promotion
+Move 72: Player -1 moved Regular piece from (1, 2) to (2, 3). No capture. No promotion
+Move 73: Player 1 moved Regular piece from (6, 1) to (5, 0). No capture. No promotion
+Move 74: Player -1 moved Regular piece from (2, 3) to (3, 2). No capture. No promotion
+Move 75: Player 1 moved Regular piece from (5, 0) to (6, 1). No capture. No promotion
+Move 76: Player -1 moved Regular piece from (3, 2) to (4, 3). No capture. No promotion
+Move 77: Player 1 moved Regular piece from (6, 1) to (5, 0). No capture. No promotion
+Move 78: Player -1 moved Regular piece from (4, 3) to (5, 2). No capture. No promotion
+Move 79: Player 1 moved Regular piece from (5, 0) to (6, 1). No capture. No promotion

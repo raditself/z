@@ -1,10 +1,22 @@
 import numpy as np
 import random
 
-class ImprovedCheckersBoard(CheckersBoard):
+class ImprovedCheckersBoard:
     def __init__(self):
-        super().__init__()
+        self.board = np.zeros((8, 8), dtype=int)
         self.kings = np.zeros((8, 8), dtype=int)
+        self.move_log = []
+        self.setup_board()
+
+    def setup_board(self):
+        for i in range(3):
+            for j in range(8):
+                if (i + j) % 2 == 1:
+                    self.board[i][j] = 1
+        for i in range(5, 8):
+            for j in range(8):
+                if (i + j) % 2 == 1:
+                    self.board[i][j] = -1
 
     def make_move(self, move):
         i, j, new_i, new_j = move
@@ -14,13 +26,27 @@ class ImprovedCheckersBoard(CheckersBoard):
         self.kings[i][j] = 0
         
         # Handle king promotion
+        promotion = False
         if (new_i == 0 and self.board[new_i][new_j] == 1) or (new_i == 7 and self.board[new_i][new_j] == -1):
             self.kings[new_i][new_j] = 1
+            promotion = True
         
         # Handle captures
+        captured = []
         if abs(new_i - i) == 2:
-            self.board[(i + new_i) // 2][(j + new_j) // 2] = 0
-            self.kings[(i + new_i) // 2][(j + new_j) // 2] = 0
+            captured_i, captured_j = (i + new_i) // 2, (j + new_j) // 2
+            captured.append((captured_i, captured_j))
+            self.board[captured_i][captured_j] = 0
+            self.kings[captured_i][captured_j] = 0
+        
+        # Log the move
+        self.move_log.append({
+            'move': move,
+            'player': self.board[new_i][new_j],
+            'is_king': bool(self.kings[new_i][new_j]),
+            'captured': captured,
+            'promotion': promotion
+        })
         
         return self
 
@@ -46,16 +72,32 @@ class ImprovedCheckersBoard(CheckersBoard):
                         moves.append((i, j, i + 2*di, j + 2*dj))
         return moves
 
+    def is_game_over(self):
+        return len(self.get_legal_moves()) == 0
+
+    def get_winner(self):
+        if np.sum(self.board == 1) == 0:
+            return -1
+        elif np.sum(self.board == -1) == 0:
+            return 1
+        elif len(self.get_legal_moves()) == 0:
+            return -1 if np.sum(self.board == 1) < np.sum(self.board == -1) else 1
+        else:
+            return 0
+
     def evaluate(self):
         player_1_pieces = np.sum(self.board == 1)
         player_2_pieces = np.sum(self.board == -1)
         player_1_kings = np.sum(self.kings[self.board == 1])
         player_2_kings = np.sum(self.kings[self.board == -1])
         
+        player_1_back_row = np.sum(self.board[7] == 1)
+        player_2_back_row = np.sum(self.board[0] == -1)
+        
         player_1_center = np.sum(self.board[3:5, 2:6] == 1)
         player_2_center = np.sum(self.board[3:5, 2:6] == -1)
         
-        score = (player_1_pieces - player_2_pieces) * 10 +                 (player_1_kings - player_2_kings) * 30 +                 (player_1_center - player_2_center) * 5
+        score = (player_1_pieces - player_2_pieces) * 10 +                 (player_1_kings - player_2_kings) * 30 +                 (player_1_center - player_2_center) * 5 +                 (player_1_back_row - player_2_back_row) * 5
         
         return score
 
@@ -91,7 +133,7 @@ def alpha_beta_search(board, depth, alpha, beta, maximizing_player):
         return min_eval
 
 def get_best_move(board, player):
-    depth = 3  # Reduced depth for faster execution
+    depth = 4
     best_move = None
     best_value = float('-inf') if player == 1 else float('inf')
     alpha = float('-inf')
@@ -119,10 +161,8 @@ def play_game():
     board = ImprovedCheckersBoard()
     player = 1
     moves = 0
-    game_history = [board.board.copy()]
-    kings_history = [board.kings.copy()]
     
-    while not board.is_game_over() and moves < 100:  # Reduced max moves to 100
+    while not board.is_game_over() and moves < 200:
         move = get_best_move(board, player)
         if move is None:
             break
@@ -130,29 +170,19 @@ def play_game():
         board.make_move(move)
         player = -player
         moves += 1
-        game_history.append(board.board.copy())
-        kings_history.append(board.kings.copy())
     
     winner = board.get_winner()
-    return winner, moves, game_history, kings_history
-
-def print_board(board, kings):
-    for i, row in enumerate(board):
-        print(' '.join(['K' if kings[i][j] else '.XO'[int(piece) + 1] for j, piece in enumerate(row)]))
-    print()
+    return winner, moves, board.move_log
 
 # Example usage
-winner, total_moves, game_history, kings_history = play_game()
-
-print("Initial board state:")
-print_board(game_history[0], kings_history[0])
-
-print("Middle game state:")
-mid_game = len(game_history) // 2
-print_board(game_history[mid_game], kings_history[mid_game])
-
-print("Final board state:")
-print_board(game_history[-1], kings_history[-1])
-
+winner, total_moves, move_log = play_game()
 print(f"Game result: {'Player 1' if winner == 1 else 'Player -1' if winner == -1 else 'Draw'}")
 print(f"Total moves: {total_moves}")
+
+king_promotions = sum(1 for move in move_log if move['promotion'])
+captures = sum(len(move['captured']) for move in move_log)
+
+print(f"\nGame Statistics:")
+print(f"King Promotions: {king_promotions}")
+print(f"Total Captures: {captures}")
+
