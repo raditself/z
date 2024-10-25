@@ -1,59 +1,61 @@
 
-# AI Board Games
+# Advanced Chess and Checkers AI Project
 
-This project implements AI players for Chess and Checkers using various techniques, including Reinforcement Learning.
+This project implements advanced AI systems for playing chess and checkers, including a mobile application for playing against the AI.
 
 ## Project Structure
 
-```
-.
-├── docs/
-│   └── ...
-├── src/
-│   ├── alphazero/
-│   │   └── ...
-│   ├── games/
-│   │   └── checkers.py
-│   ├── reinforcement_learning/
-│   │   ├── rl_agent.py
-│   │   ├── chess_rl_wrapper.py
-│   │   ├── checkers_rl_wrapper.py
-│   │   └── train_rl_agents.py
-│   └── web/
-│       └── ...
-├── static/
-│   └── ...
-├── templates/
-│   └── ...
-├── tests/
-│   ├── test_game_logic.py
-│   └── test_rl_agent.py
-├── unit/
-│   └── ...
-├── README.md
-├── requirements.txt
-└── ...
-```
+- `src/`: Contains the main source code for the AI implementations
+  - `alphazero/`: AlphaZero implementation for chess
+  - `games/`: Game logic for chess and checkers
+  - `reinforcement_learning/`: Reinforcement learning implementations
+  - `web/`: Web API for AI integration
+- `mobile_app/`: React Native mobile application for playing against the AI
+- `tests/`: Unit and integration tests
+- `docs/`: Project documentation
 
-## Reinforcement Learning
+## Features
 
-The project now includes a Reinforcement Learning implementation for both Chess and Checkers. The RL agents use Q-learning to improve their gameplay through self-play.
+- AlphaZero-based chess AI
+- Checkers AI with reinforcement learning
+- Opening book system with support for multiple chess variants
+- Endgame tablebases for perfect endgame play
+- Distributed training system for faster learning
+- Mobile application for playing against the AI
+- Web API for AI move generation
 
-To train and test the RL agents, run:
+## Getting Started
 
-```
-python src/reinforcement_learning/train_rl_agents.py
-```
+### Setting up the AI and Web API
 
-This script will train RL agents for both Chess and Checkers, and then test their performance.
+1. Clone the repository:
+   ```
+   git clone https://github.com/raditself/z.git
+   cd z
+   ```
 
-## Running Tests
+2. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
-To run the tests for the Reinforcement Learning implementation, use:
+3. Run the web API:
+   ```
+   python src/web/api.py
+   ```
 
-```
-python -m pytest tests/test_rl_agent.py
-```
+### Running the Mobile App
 
-## ...
+Please refer to the [mobile app README](./mobile_app/README.md) for detailed instructions on setting up and running the mobile application.
 
+## Documentation
+
+For more detailed information about the project, please refer to the [full documentation](./docs/full_documentation.md).
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
