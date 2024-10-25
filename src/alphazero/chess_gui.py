@@ -8,6 +8,7 @@ import chess
 import time
 import tkinter as tk
 from tkinter import filedialog
+from visualization import visualize_move_explanations, plot_move_probabilities
 
 # Initialize Pygame
 pygame.init()
@@ -17,7 +18,7 @@ WIDTH, HEIGHT = 640, 800
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
 # Set title
-pygame.display.set_caption("Chess AI")
+pygame.display.set_caption("Chess AI with Explanations")
 
 # Define board dimensions
 ROWS, COLS = 8, 8
@@ -45,6 +46,9 @@ for piece in ['P', 'R', 'N', 'B', 'Q', 'K', 'p', 'r', 'n', 'b', 'q', 'k']:
 # Initialize font
 pygame.font.init()
 font = pygame.font.Font(None, 36)
+
+# Add a flag for showing explanations
+show_explanation = False
 
 def draw_board():
     for row in range(ROWS):
@@ -82,6 +86,7 @@ def update_display():
     draw_button("New Game", 20, HEIGHT - 100, 120, 40)
     draw_button("AI Move", WIDTH - 140, HEIGHT - 100, 120, 40)
     draw_button("Load PGN", WIDTH // 2 - 60, HEIGHT - 100, 120, 40)
+    draw_button("Toggle Explanations", WIDTH // 2 - 90, HEIGHT - 50, 180, 40)
     pygame.display.update()
 
 def get_square_from_pos(pos):
@@ -98,66 +103,60 @@ def load_pgn():
         with open(file_path, 'r') as pgn_file:
             pgn_content = pgn_file.read()
             game = game_analysis.load_pgn(pgn_content)
-            analysis = game_analysis.analyze_game(game)
-            critical_positions = game_analysis.get_critical_positions(analysis)
-            improvements = game_analysis.suggest_improvements(game, analysis)
-            
-            print("Analysis Results:")
-            print("Critical Positions:")
-            for pos in critical_positions:
-                print(f"Move: {pos['move']}, Evaluation: {pos['evaluation']}")
-            
-            print("\nSuggested Improvements:")
-            for imp in improvements:
-                print(f"Move {imp['move_number']}: {imp['player_move']} -> {imp['suggested_move']} (Eval diff: {imp['evaluation_diff']})")
 
-# Main game loop
+def make_ai_move():
+    ai_move = chess_ai.get_move(chess_game.board)
+    chess_game.make_move(ai_move)
+    if show_explanation:
+        explanations = chess_ai.get_move_explanations()
+        visualize_move_explanations(explanations)
+        plot_move_probabilities(chess_ai.move_evaluations)
+
 def main():
+    global show_explanation
     selected_square = None
-    last_update_time = time.time()
+    running = True
 
-    while True:
-        current_time = time.time()
-        if current_time - last_update_time >= 0.1:  # Update every 100ms
-            chess_game.update_clock()
-            last_update_time = current_time
-
+    while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                pos = pygame.mouse.get_pos()
-                if pos[1] < HEIGHT - 160:  # Check if the click is on the chessboard
-                    square = get_square_from_pos(pos)
+                x, y = pygame.mouse.get_pos()
+                if y < HEIGHT - 160:  # Click on the board
+                    square = get_square_from_pos((x, y))
                     if selected_square is None:
                         selected_square = square
                     else:
-                        if chess_game.make_move(selected_square, square):
+                        move = chess.Move(selected_square, square)
+                        if move in chess_game.board.legal_moves:
+                            chess_game.make_move(move)
                             selected_square = None
                         else:
                             selected_square = square
-                else:  # Check if a button was clicked
-                    if 20 <= pos[0] <= 140 and HEIGHT - 100 <= pos[1] <= HEIGHT - 60:
-                        chess_game = ChessGame(initial_time=600)  # New Game
-                        selected_square = None
-                    elif WIDTH - 140 <= pos[0] <= WIDTH - 20 and HEIGHT - 100 <= pos[1] <= HEIGHT - 60:
-                        ai_move = chess_ai.get_best_move(chess_game.board)
-                        if ai_move:
-                            chess_game.make_move(ai_move.from_square, ai_move.to_square)
-                    elif WIDTH // 2 - 60 <= pos[0] <= WIDTH // 2 + 60 and HEIGHT - 100 <= pos[1] <= HEIGHT - 60:
+                else:  # Click on buttons
+                    if 20 <= x <= 140 and HEIGHT - 100 <= y <= HEIGHT - 60:
+                        chess_game = ChessGame(initial_time=600)
+                    elif WIDTH - 140 <= x <= WIDTH - 20 and HEIGHT - 100 <= y <= HEIGHT - 60:
+                        make_ai_move()
+                    elif WIDTH // 2 - 60 <= x <= WIDTH // 2 + 60 and HEIGHT - 100 <= y <= HEIGHT - 60:
                         load_pgn()
+                    elif WIDTH // 2 - 90 <= x <= WIDTH // 2 + 90 and HEIGHT - 50 <= y <= HEIGHT - 10:
+                        show_explanation = not show_explanation
+                        print(f"Explanations {'enabled' if show_explanation else 'disabled'}")
 
         update_display()
         if selected_square is not None:
             highlight_square(selected_square)
-        pygame.display.update()
+        pygame.display.flip()
 
         if chess_game.is_game_over():
             print(f"Game Over! Result: {chess_game.get_result()}")
             chess_game = ChessGame(initial_time=600)  # Start a new game
             selected_square = None
 
-if __name__ == '__main__':
-    main()
+    pygame.quit()
+    sys.exit()
 
+if __name__ == "__main__":
+    main()
