@@ -1,83 +1,107 @@
-import random
-import json
+
+import torch
+import os
+import argparse
 from tqdm import tqdm
-from .game import ChessGame
-from .model import AlphaZeroNetwork, import_model
+from .game import Game
+from .model import ChessModel
+from .improved_model import ImprovedChessModel
 from .mcts import MCTS
+import numpy as np
 
-class Tournament:
-    def __init__(self, model_paths, num_games=100, time_limit=600, increment=10):
-        self.model_paths = model_paths
-        self.num_games = num_games
-        self.time_limit = time_limit
-        self.increment = increment
-        self.results = {path: {'wins': 0, 'losses': 0, 'draws': 0} for path in model_paths}
+def load_model(model_path, model_class=ImprovedChessModel):
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    game = Game()
+    model = model_class(board_size=game.board_size, action_size=game.action_size)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    return model
 
-    def run_tournament(self):
-        for i in tqdm(range(self.num_games), desc="Tournament Progress"):
-            white_model_path, black_model_path = random.sample(self.model_paths, 2)
-            result = self.play_game(white_model_path, black_model_path)
-            self.update_results(white_model_path, black_model_path, result)
+def play_game(model1, model2, game, num_simulations=100):
+    mcts1 = MCTS(game, model1, num_simulations)
+    mcts2 = MCTS(game, model2, num_simulations)
+    
+    state = game.get_initial_state()
+    player = 1
+    
+    while not game.is_game_over(state):
+        if player == 1:
+            action = mcts1.get_action(state)
+        else:
+            action = mcts2.get_action(state)
+        
+        state = game.get_next_state(state, action, player)
+        player = -player
+    
+    return game.get_winner(state)
 
-    def play_game(self, white_model_path, black_model_path):
-        game = ChessGame(initial_time=self.time_limit, increment=self.increment)
-        try:
-            white_model = self.load_model(white_model_path)
-            black_model = self.load_model(black_model_path)
-        except Exception as e:
-            print(f"Error loading models: {e}")
-            return None
+def run_tournament(model_paths, num_games=100):
+    game = Game()
+    models = [load_model(path) for path in model_paths]
+    n = len(models)
+    scores = np.zeros((n, n))
+    
+    total_games = n * (n - 1) * num_games // 2
+    with tqdm(total=total_games, desc="Tournament Progress") as pbar:
+        for i in range(n):
+            for j in range(i+1, n):
+                for _ in range(num_games // 2):
+                    result = play_game(models[i], models[j], game)
+                    if result == 1:
+                        scores[i, j] += 1
+                    elif result == -1:
+                        scores[j, i] += 1
+                    else:
+                        scores[i, j] += 0.5
+                        scores[j, i] += 0.5
+                    
+                    # Play reverse game
+                    result = play_game(models[j], models[i], game)
+                    if result == 1:
+                        scores[j, i] += 1
+                    elif result == -1:
+                        scores[i, j] += 1
+                    else:
+                        scores[i, j] += 0.5
+                        scores[j, i] += 0.5
+                    
+                    pbar.update(2)
+    
+    return scores
 
-        white_mcts = MCTS(white_model)
-        black_mcts = MCTS(black_model)
+def calculate_elo(scores, k=32):
+    n = len(scores)
+    elo_ratings = [1500] * n
+    
+    for _ in range(10):  # Run multiple iterations for better convergence
+        for i in range(n):
+            for j in range(i+1, n):
+                ea = 1 / (1 + 10 ** ((elo_ratings[j] - elo_ratings[i]) / 400))
+                eb = 1 / (1 + 10 ** ((elo_ratings[i] - elo_ratings[j]) / 400))
+                
+                total_games = scores[i, j] + scores[j, i]
+                if total_games > 0:
+                    sa = scores[i, j] / total_games
+                    sb = scores[j, i] / total_games
+                    
+                    elo_ratings[i] += k * (sa - ea)
+                    elo_ratings[j] += k * (sb - eb)
+    
+    return elo_ratings
 
-        while not game.is_game_over():
-            if game.current_player == 1:
-                move = white_mcts.get_best_move(game)
-            else:
-                move = black_mcts.get_best_move(game)
-            game.make_move(move)
+def main():
+    parser = argparse.ArgumentParser(description="Run a tournament between different AlphaZero models")
+    parser.add_argument("model_paths", nargs="+", help="Paths to the model files")
+    parser.add_argument("--num_games", type=int, default=100, help="Number of games to play between each pair of models")
+    args = parser.parse_args()
 
-        return game.get_result()
+    scores = run_tournament(args.model_paths, args.num_games)
+    elo_ratings = calculate_elo(scores)
+    
+    print("\nTournament Results:")
+    for i, path in enumerate(args.model_paths):
+        print(f"{path}: ELO Rating = {elo_ratings[i]:.2f}")
 
-    def load_model(self, model_path):
-        try:
-            input_shape = (3, 8, 8)  # Adjust if necessary
-            model = AlphaZeroNetwork(input_shape, 64 * 64)  # 64*64 for all possible moves
-            import_model(model, model_path)
-            return model
-        except Exception as e:
-            raise Exception(f"Failed to load model from {model_path}: {e}")
-
-    def update_results(self, white_model_path, black_model_path, result):
-        if result is None:
-            return
-        if result == '1-0':
-            self.results[white_model_path]['wins'] += 1
-            self.results[black_model_path]['losses'] += 1
-        elif result == '0-1':
-            self.results[white_model_path]['losses'] += 1
-            self.results[black_model_path]['wins'] += 1
-        else:  # Draw
-            self.results[white_model_path]['draws'] += 1
-            self.results[black_model_path]['draws'] += 1
-
-    def get_rankings(self):
-        def score(results):
-            return results['wins'] + 0.5 * results['draws']
-
-        return sorted(self.results.items(), key=lambda x: score(x[1]), reverse=True)
-
-    def print_results(self):
-        rankings = self.get_rankings()
-        print("Tournament Results:")
-        for rank, (model_path, results) in enumerate(rankings, 1):
-            print(f"{rank}. {model_path}: Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
-
-    def save_results(self, filename):
-        with open(filename, 'w') as f:
-            json.dump(self.results, f, indent=4)
-
-    def load_results(self, filename):
-        with open(filename, 'r') as f:
-            self.results = json.load(f)
+if __name__ == "__main__":
+    main()
