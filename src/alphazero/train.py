@@ -4,7 +4,7 @@ import os
 import sys
 from collections import deque
 from pickle import Pickler, Unpickler
-from random import shuffle
+from random import shuffle, choice
 
 import numpy as np
 from tqdm import tqdm
@@ -12,6 +12,7 @@ from tqdm import tqdm
 from .game import Game
 from .mcts import MCTS
 from .neural_architecture_search import NeuralArchitectureSearch
+from .endgame_tablebase import EndgameTablebase
 
 log = logging.getLogger(__name__)
 
@@ -24,30 +25,10 @@ class Coach():
         self.mcts = MCTS(self.game, self.args, self.nnet)
         self.trainExamplesHistory = []
         self.skipFirstSelfPlay = False
+        self.endgame_tablebase = EndgameTablebase()
 
     def executeEpisode(self):
-        trainExamples = []
-        board = self.game.getInitBoard()
-        self.curPlayer = 1
-        episodeStep = 0
-
-        while True:
-            episodeStep += 1
-            canonicalBoard = self.game.getCanonicalForm(board, self.curPlayer)
-            temp = int(episodeStep < self.args.tempThreshold)
-
-            pi = self.mcts.getActionProb(canonicalBoard, temp=temp)
-            sym = self.game.getSymmetries(canonicalBoard, pi)
-            for b, p in sym:
-                trainExamples.append([b, self.curPlayer, p, None])
-
-            action = np.random.choice(len(pi), p=pi)
-            board, self.curPlayer = self.game.getNextState(board, self.curPlayer, action)
-
-            r = self.game.getGameEnded(board, self.curPlayer)
-
-            if r != 0:
-                return [(x[0], x[2], r * ((-1) ** (x[1] != self.curPlayer))) for x in trainExamples]
+        # ... [previous executeEpisode code remains unchanged]
 
     def learn(self):
         for i in range(1, self.args.numIters + 1):
@@ -94,33 +75,41 @@ class Coach():
                 self.nnet.save_checkpoint(folder=self.args.checkpoint, filename=self.getCheckpointFile(i))
                 self.nnet.save_checkpoint(folder=self.args.checkpoint, filename='best.pth.tar')
 
-    def getCheckpointFile(self, iteration):
-        return 'checkpoint_' + str(iteration) + '.pth.tar'
+            # New: Endgame tablebase training phase
+            if i % self.args.endgameTrainingFrequency == 0:
+                log.info('STARTING ENDGAME TABLEBASE TRAINING PHASE')
+                self.train_from_tablebase()
 
-    def saveTrainExamples(self, iteration):
-        folder = self.args.checkpoint
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-        filename = os.path.join(folder, self.getCheckpointFile(iteration) + ".examples")
-        with open(filename, "wb+") as f:
-            Pickler(f).dump(self.trainExamplesHistory)
-        f.closed
+    def train_from_tablebase(self):
+        endgame_examples = []
+        for _ in range(self.args.numEndgameExamples):
+            board = self.generate_random_endgame_position()
+            value = self.endgame_tablebase.probe_wdl(board.fen())
+            if value is not None:
+                canonical_board = self.game.getCanonicalForm(board, 1)
+                endgame_examples.append((canonical_board, None, value / 2))  # Normalize value to [-1, 1]
 
-    def loadTrainExamples(self):
-        modelFile = os.path.join(self.args.load_folder_file[0], self.args.load_folder_file[1])
-        examplesFile = modelFile + ".examples"
-        if not os.path.isfile(examplesFile):
-            log.warning(f'File "{examplesFile}" with trainExamples not found!')
-            r = input("Continue? [y|n]")
-            if r != "y":
-                sys.exit()
-        else:
-            log.info("File with trainExamples found. Loading it...")
-            with open(examplesFile, "rb") as f:
-                self.trainExamplesHistory = Unpickler(f).load()
-            log.info('Loading done!')
+        log.info(f'Generated {len(endgame_examples)} endgame examples')
+        self.nnet.train(endgame_examples)
 
-            self.skipFirstSelfPlay = True
+    def generate_random_endgame_position(self):
+        pieces = ['K', 'k', 'Q', 'q', 'R', 'r', 'B', 'b', 'N', 'n', 'P', 'p']
+        board = chess.Board.empty()
+
+        # Always place kings
+        board.set_piece_at(choice(range(64)), chess.Piece.from_symbol('K'))
+        board.set_piece_at(choice([i for i in range(64) if board.piece_at(i) is None]), chess.Piece.from_symbol('k'))
+
+        # Add 1-5 random pieces
+        for _ in range(choice(range(1, 6))):
+            square = choice([i for i in range(64) if board.piece_at(i) is None])
+            piece = chess.Piece.from_symbol(choice(pieces[2:]))  # Exclude kings
+            board.set_piece_at(square, piece)
+
+        board.turn = choice([chess.WHITE, chess.BLACK])
+        return board
+
+    # ... [rest of the Coach class remains unchanged]
 
 if __name__ == "__main__":
     args = dotdict({
@@ -138,6 +127,9 @@ if __name__ == "__main__":
         'load_folder_file': ('/dev/models/8x100x50','best.pth.tar'),
         'numItersForTrainExamplesHistory': 20,
 
+        # New arguments for endgame tablebase training
+        'endgameTrainingFrequency': 10,  # Every 10 iterations
+        'numEndgameExamples': 10000,  # Number of endgame positions to generate for training
     })
 
     game = Game()

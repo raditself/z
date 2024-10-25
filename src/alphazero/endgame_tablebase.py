@@ -1,66 +1,59 @@
 
 import chess
-import random
+import chess.syzygy
+from functools import lru_cache
 
 class EndgameTablebase:
     def __init__(self):
-        pass
+        tablebase_path = "/home/user/z/data/syzygy/shakmaty-syzygy/3-4-5"
+        self.tablebase = chess.syzygy.open_tablebase(tablebase_path)
 
-    def probe_wdl(self, board):
+    @lru_cache(maxsize=10000)
+    def probe_wdl(self, board_fen):
         """
-        Simulate probing the Win-Draw-Loss (WDL) table.
+        Probe the Win-Draw-Loss (WDL) table.
         Returns:
         2: Win
         0: Draw
         -2: Loss
+        None: Position not in tablebase
         """
-        # Simplified logic: If the side to move has more material, it's winning
-        if board.turn == chess.WHITE:
-            return 2 if self._white_material(board) > self._black_material(board) else -2
-        else:
-            return 2 if self._black_material(board) > self._white_material(board) else -2
+        board = chess.Board(board_fen)
+        try:
+            return self.tablebase.probe_wdl(board)
+        except ValueError:
+            return None
 
-    def probe_dtz(self, board):
+    @lru_cache(maxsize=10000)
+    def probe_dtz(self, board_fen):
         """
-        Simulate probing the Distance-To-Zero (DTZ) table.
-        Returns a random number of moves to reach a zeroing position.
+        Probe the Distance-To-Zero (DTZ) table.
+        Returns the number of moves to reach a zeroing position (capture or pawn move).
+        None if position not in tablebase.
         """
-        return random.randint(1, 50)
+        board = chess.Board(board_fen)
+        try:
+            return self.tablebase.probe_dtz(board)
+        except ValueError:
+            return None
 
     def get_best_move(self, board):
         """
-        Get a 'best' move based on simple heuristics.
+        Get the best move according to the tablebase.
+        Returns the best move or None if not in tablebase.
         """
         best_move = None
-        best_score = float('-inf')
+        best_wdl = -3  # Worse than any real WDL value
 
         for move in board.legal_moves:
             board.push(move)
-            score = self._evaluate_position(board)
+            wdl = self.probe_wdl(board.fen())
             board.pop()
 
-            if score > best_score:
-                best_score = score
-                best_move = move
+            if wdl is not None:
+                wdl = -wdl  # Negate because we're looking from the opponent's perspective
+                if wdl > best_wdl:
+                    best_wdl = wdl
+                    best_move = move
 
         return best_move
-
-    def _evaluate_position(self, board):
-        """
-        Simple position evaluation.
-        """
-        return self._white_material(board) - self._black_material(board)
-
-    def _white_material(self, board):
-        return (len(board.pieces(chess.PAWN, chess.WHITE)) +
-                3 * len(board.pieces(chess.KNIGHT, chess.WHITE)) +
-                3 * len(board.pieces(chess.BISHOP, chess.WHITE)) +
-                5 * len(board.pieces(chess.ROOK, chess.WHITE)) +
-                9 * len(board.pieces(chess.QUEEN, chess.WHITE)))
-
-    def _black_material(self, board):
-        return (len(board.pieces(chess.PAWN, chess.BLACK)) +
-                3 * len(board.pieces(chess.KNIGHT, chess.BLACK)) +
-                3 * len(board.pieces(chess.BISHOP, chess.BLACK)) +
-                5 * len(board.pieces(chess.ROOK, chess.BLACK)) +
-                9 * len(board.pieces(chess.QUEEN, chess.BLACK)))
