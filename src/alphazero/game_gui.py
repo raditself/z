@@ -1,8 +1,10 @@
+
 import pygame
 import sys
 from chess_logic import ChessGame
 from checkers import Checkers
 from chess_ai import ChessAI
+from checkers_ai import CheckersAI
 from game_analysis import GameAnalysis
 import chess
 import time
@@ -36,7 +38,43 @@ pygame.font.init()
 font = pygame.font.Font(None, 36)
 
 class GameGUI:
-    def __init__(self, game_type='chess'):
+    def __init__(self):
+        self.game_type = None
+        self.game = None
+        self.ai = None
+        self.game_analysis = None
+        self.board_surface = pygame.Surface((WIDTH, WIDTH))
+        self.show_menu()
+
+    def show_menu(self):
+        menu_options = ['Chess', 'Checkers']
+        button_height = 50
+        button_width = 200
+        button_margin = 20
+        total_height = len(menu_options) * (button_height + button_margin) - button_margin
+        start_y = (HEIGHT - total_height) // 2
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = pygame.mouse.get_pos()
+                    for i, option in enumerate(menu_options):
+                        button_y = start_y + i * (button_height + button_margin)
+                        button_rect = pygame.Rect((WIDTH - button_width) // 2, button_y, button_width, button_height)
+                        if button_rect.collidepoint(mouse_pos):
+                            self.start_game(option.lower())
+                            return
+
+            screen.fill(WHITE)
+            for i, option in enumerate(menu_options):
+                button_y = start_y + i * (button_height + button_margin)
+                self.draw_button(option, (WIDTH - button_width) // 2, button_y, button_width, button_height)
+            pygame.display.flip()
+
+    def start_game(self, game_type):
         self.game_type = game_type
         if game_type == 'chess':
             self.game = ChessGame(initial_time=600)  # 10 minutes
@@ -45,9 +83,9 @@ class GameGUI:
             self.load_chess_pieces()
         elif game_type == 'checkers':
             self.game = Checkers()
+            self.ai = CheckersAI(depth=3)
             self.load_checkers_pieces()
         
-        self.board_surface = pygame.Surface((WIDTH, WIDTH))
         self.update_board_surface()
 
     def load_chess_pieces(self):
@@ -108,91 +146,18 @@ class GameGUI:
         self.draw_board()
         if self.game_type == 'chess':
             self.draw_clock()
-        self.draw_button("New Game", 20, HEIGHT - 100, 120, 40)
-        self.draw_button("AI Move", WIDTH - 140, HEIGHT - 100, 120, 40)
-        if self.game_type == 'chess':
-            self.draw_button("Load PGN", WIDTH // 2 - 60, HEIGHT - 100, 120, 40)
-        pygame.display.update()
-
-    def get_square_from_pos(self, pos):
-        x, y = pos
-        col = x // SQUARE_SIZE
-        row = y // SQUARE_SIZE
-        if self.game_type == 'chess':
-            return chess.square(col, 7 - row)
-        elif self.game_type == 'checkers':
-            return (row, col)
-
-    def load_pgn(self):
-        if self.game_type == 'chess':
-            root = tk.Tk()
-            root.withdraw()
-            file_path = filedialog.askopenfilename(filetypes=[("PGN files", "*.pgn")])
-            if file_path:
-                with open(file_path, 'r') as pgn_file:
-                    pgn_content = pgn_file.read()
-                    game = self.game_analysis.load_pgn(pgn_content)
-                    analysis = self.game_analysis.analyze_game(game)
-                    critical_positions = self.game_analysis.get_critical_positions(analysis)
-                    improvements = self.game_analysis.suggest_improvements(game, analysis)
 
     def run(self):
-        selected_square = None
-        running = True
-        clock = pygame.time.Clock()
-        while running:
+        while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    pos = pygame.mouse.get_pos()
-                    if pos[1] < HEIGHT - 120:
-                        square = self.get_square_from_pos(pos)
-                        if selected_square is None:
-                            selected_square = square
-                        else:
-                            # Make move
-                            if self.game_type == 'chess':
-                                move = chess.Move(selected_square, square)
-                                if move in self.game.board.legal_moves:
-                                    self.game.make_move(move)
-                                    self.update_board_surface()
-                            elif self.game_type == 'checkers':
-                                move = (selected_square[0], selected_square[1], square[0], square[1])
-                                if move in self.game.get_valid_moves():
-                                    self.game.make_move(move)
-                                    self.update_board_surface()
-                            selected_square = None
-                    else:
-                        if 20 <= pos[0] <= 140 and HEIGHT - 100 <= pos[1] <= HEIGHT - 60:
-                            # New Game button
-                            if self.game_type == 'chess':
-                                self.game = ChessGame(initial_time=600)
-                            elif self.game_type == 'checkers':
-                                self.game = Checkers()
-                            self.update_board_surface()
-                        elif WIDTH - 140 <= pos[0] <= WIDTH - 20 and HEIGHT - 100 <= pos[1] <= HEIGHT - 60:
-                            # AI Move button
-                            if self.game_type == 'chess':
-                                ai_move = self.ai.get_best_move(self.game.board)
-                                self.game.make_move(ai_move)
-                                self.update_board_surface()
-                            elif self.game_type == 'checkers':
-                                # Implement Checkers AI move here
-                                pass
-                        elif self.game_type == 'chess' and WIDTH // 2 - 60 <= pos[0] <= WIDTH // 2 + 60 and HEIGHT - 100 <= pos[1] <= HEIGHT - 60:
-                            # Load PGN button (Chess only)
-                            self.load_pgn()
+                    pygame.quit()
+                    sys.exit()
+                # Add event handling for game moves here
 
             self.update_display()
-            if selected_square is not None:
-                self.highlight_square(selected_square)
             pygame.display.flip()
-            clock.tick(60)  # Limit to 60 FPS
-
-        pygame.quit()
-        sys.exit()
 
 if __name__ == "__main__":
-    game_gui = GameGUI(game_type='chess')  # or 'checkers'
-    game_gui.run()
+    gui = GameGUI()
+    gui.run()
