@@ -1,74 +1,59 @@
-# AlphaZero-like Board Game AI
 
-This project implements an AlphaZero-like AI system for playing board games, currently supporting Chess and Checkers.
+# AI Board Games
 
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Installation](#installation)
-4. [Usage](#usage)
-5. [Project Structure](#project-structure)
-6. [Contributing](#contributing)
-7. [License](#license)
-
-## Overview
-
-This project aims to create a versatile AI system capable of playing various board games using techniques inspired by AlphaZero. The current implementation supports Chess and Checkers, with the potential to add more games in the future.
-
-## Features
-
-- Support for multiple board games (Chess and Checkers)
-- Graphical user interface for playing against the AI
-- AI opponent using Monte Carlo Tree Search (MCTS) and neural networks
-- Game analysis tools for chess games
-- Ability to load and analyze PGN files for chess games
-
-## Installation
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/alphazero-board-games.git
-   cd alphazero-board-games
-   ```
-
-2. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-## Usage
-
-To start the game GUI:
-
-```
-python src/alphazero/game_gui.py
-```
-
-By default, the Chess game will be loaded. To play Checkers, modify the last line of the game_gui.py file to:
-
-```python
-game_gui = GameGUI(game_type='checkers')
-```
+This project implements AI players for Chess and Checkers using various techniques, including Reinforcement Learning.
 
 ## Project Structure
 
-- `src/`: Contains the main source code
-  - `alphazero/`: AlphaZero-related implementations
-    - `chess_logic.py`: Chess game logic
-    - `checkers.py`: Checkers game logic
-    - `game_gui.py`: Graphical user interface for games
-    - `chess_ai.py`: Chess AI implementation
-    - `game_analysis.py`: Game analysis tools
-  - `games/`: Game-specific implementations
-- `tests/`: Unit tests
-- `static/`: Static files (e.g., images)
-- `templates/`: HTML templates (if applicable)
+```
+.
+├── docs/
+│   └── ...
+├── src/
+│   ├── alphazero/
+│   │   └── ...
+│   ├── games/
+│   │   └── checkers.py
+│   ├── reinforcement_learning/
+│   │   ├── rl_agent.py
+│   │   ├── chess_rl_wrapper.py
+│   │   ├── checkers_rl_wrapper.py
+│   │   └── train_rl_agents.py
+│   └── web/
+│       └── ...
+├── static/
+│   └── ...
+├── templates/
+│   └── ...
+├── tests/
+│   ├── test_game_logic.py
+│   └── test_rl_agent.py
+├── unit/
+│   └── ...
+├── README.md
+├── requirements.txt
+└── ...
+```
 
-## Contributing
+## Reinforcement Learning
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+The project now includes a Reinforcement Learning implementation for both Chess and Checkers. The RL agents use Q-learning to improve their gameplay through self-play.
 
-## License
+To train and test the RL agents, run:
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+```
+python src/reinforcement_learning/train_rl_agents.py
+```
+
+This script will train RL agents for both Chess and Checkers, and then test their performance.
+
+## Running Tests
+
+To run the tests for the Reinforcement Learning implementation, use:
+
+```
+python -m pytest tests/test_rl_agent.py
+```
+
+## ...
+
