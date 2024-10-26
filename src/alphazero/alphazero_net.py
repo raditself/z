@@ -1,6 +1,8 @@
 
 import torch
 import torch.nn as nn
+from torch.cuda.amp import autocast, GradScaler
+import torch.optim as optim
 
 class SEBlock(nn.Module):
     def __init__(self, channel, reduction=16):
@@ -75,3 +77,40 @@ class AlphaZeroNet(nn.Module):
         policy = self.policy_head(x)
         value = self.value_head(x)
         return policy, value
+
+    def train_network(self, examples, batch_size, epochs, lr=0.001, accumulation_steps=4):
+        optimizer = optim.Adam(self.parameters(), lr=lr)
+        scaler = GradScaler()
+        
+        for epoch in range(epochs):
+            self.train()
+            running_loss = 0.0
+            for i in range(0, len(examples), batch_size):
+                batch = examples[i:i+batch_size]
+                states, target_policies, target_values = zip(*batch)
+                
+                states = torch.FloatTensor(states).cuda()
+                target_policies = torch.FloatTensor(target_policies).cuda()
+                target_values = torch.FloatTensor(target_values).unsqueeze(1).cuda()
+                
+                for j in range(0, len(states), accumulation_steps):
+                    sub_states = states[j:j+accumulation_steps]
+                    sub_target_policies = target_policies[j:j+accumulation_steps]
+                    sub_target_values = target_values[j:j+accumulation_steps]
+                    
+                    with autocast():
+                        out_policies, out_values = self(sub_states)
+                        policy_loss = nn.functional.cross_entropy(out_policies, sub_target_policies)
+                        value_loss = nn.functional.mse_loss(out_values, sub_target_values)
+                        loss = policy_loss + value_loss
+                    
+                    scaler.scale(loss).backward()
+                    
+                if (i + 1) % (accumulation_steps * batch_size) == 0 or (i + 1) == len(examples):
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+                
+                running_loss += loss.item()
+            
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {running_loss/len(examples):.4f}")
