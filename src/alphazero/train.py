@@ -5,6 +5,7 @@ from .nnet import NNetWrapper
 from .coach import Coach
 from .utils import *
 from .online_integration import OnlineIntegration
+from .data_handler import DataHandler
 
 def main():
     parser = argparse.ArgumentParser(description='Train and play with AlphaZero')
@@ -21,6 +22,7 @@ def main():
     parser.add_argument('--load_folder_file', type=tuple, default=('/dev/models/8x100x50','best.pth.tar'), help='Folder and file to load model from')
     parser.add_argument('--numItersForTrainExamplesHistory', type=int, default=20, help='Number of iterations for train examples history')
     parser.add_argument('--moveTime', type=int, default=1, help='Time limit for each move (in seconds)')
+    parser.add_argument('--data_dir', type=str, default='./data', help='Directory for storing training data')
 
     # New arguments for neural architecture search
     parser.add_argument('--perform_nas', type=bool, default=False, help='Perform Neural Architecture Search')
@@ -48,8 +50,11 @@ def main():
     else:
         log.warning('Not loading a checkpoint!')
 
+    log.info('Initializing DataHandler...')
+    data_handler = DataHandler(args.data_dir)
+
     log.info('Loading the Coach...')
-    c = Coach(g, nnet, args)
+    c = Coach(g, nnet, args, data_handler)
 
     if args.load_model:
         log.info("Loading 'trainExamples' from file...")
