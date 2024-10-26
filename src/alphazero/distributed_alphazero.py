@@ -12,7 +12,8 @@ from .alphazero_net import AlphaZeroNet
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
 
 def cleanup():
     dist.destroy_process_group()
@@ -22,7 +23,9 @@ class DistributedAlphaZero(AlphaZero):
         super().__init__(game, args)
         self.rank = rank
         self.world_size = world_size
-        self.net = DDP(self.net, device_ids=[self.rank])
+        self.device = torch.device(f"cuda:{rank}")
+        self.net = self.net.to(self.device)
+        self.net = DDP(self.net, device_ids=[rank])
         self.logger = AlphaZeroLogger(os.path.join(args.log_dir, f'worker_{rank}'))
         self.evaluator = AlphaZeroEvaluator(game, args)
 
@@ -40,11 +43,16 @@ class DistributedAlphaZero(AlphaZero):
             self.logger.log_info(f"Worker {self.rank}: Starting iteration {iteration}")
             examples = self.distributed_self_play()
             
+            policy_loss, value_loss = self.train(examples)
+            dist.all_reduce(policy_loss)
+            dist.all_reduce(value_loss)
+            policy_loss /= self.world_size
+            value_loss /= self.world_size
+            
             if self.rank == 0:
                 self.logger.log_info(f"Training on {len(examples)} examples")
-                policy_loss, value_loss = self.train(examples)
-                self.logger.log_scalar('policy_loss', policy_loss, iteration)
-                self.logger.log_scalar('value_loss', value_loss, iteration)
+                self.logger.log_scalar('policy_loss', policy_loss.item(), iteration)
+                self.logger.log_scalar('value_loss', value_loss.item(), iteration)
                 
                 current_model_path = f'model_iter_{iteration}.pth'
                 torch.save(self.net.module.state_dict(), current_model_path)
@@ -65,9 +73,9 @@ class DistributedAlphaZero(AlphaZero):
                     best_model_path = current_model_path
             
             dist.barrier()
-            if self.rank == 0:
-                for name, param in self.net.named_parameters():
-                    dist.broadcast(param.data, 0)
+            for name, param in self.net.named_parameters():
+                dist.broadcast(param.data, 0)
+                if self.rank == 0:
                     self.logger.log_histogram(f'param_{name}', param.data, iteration)
 
             self.logger.log_info(f"Worker {self.rank}: Finished iteration {iteration}")

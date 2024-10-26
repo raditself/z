@@ -1,32 +1,33 @@
 
-import argparse
 import os
-from .tictactoe import TicTacToe
-from .distributed_alphazero import distributed_main
+import argparse
+import torch
+import torch.multiprocessing as mp
+from distributed_alphazero import setup, cleanup, DistributedAlphaZero
+from games.tictactoe import TicTacToe  # Assuming TicTacToe is implemented
 
-def main():
-    parser = argparse.ArgumentParser(description='Train Distributed AlphaZero for Tic-Tac-Toe')
+def run(rank, world_size, args):
+    setup(rank, world_size)
+    game = TicTacToe()
+    distributed_alphazero = DistributedAlphaZero(game, args, rank, world_size)
+    distributed_alphazero.distributed_learn()
+    cleanup()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Distributed AlphaZero')
     parser.add_argument('--num_iterations', type=int, default=100, help='Number of training iterations')
     parser.add_argument('--num_episodes', type=int, default=100, help='Number of self-play episodes per iteration')
     parser.add_argument('--num_simulations', type=int, default=25, help='Number of MCTS simulations per move')
-    parser.add_argument('--c_puct', type=float, default=1.0, help='Exploration constant for PUCT')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate for the optimizer')
-    parser.add_argument('--weight_decay', type=float, default=1e-4, help='Weight decay for the optimizer')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs per training iteration')
-    parser.add_argument('--checkpoint_interval', type=int, default=10, help='Interval for saving model checkpoints')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of worker processes for distributed training')
+    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--log_dir', type=str, default='logs', help='Directory for storing logs')
-    parser.add_argument('--eval_games', type=int, default=100, help='Number of games to play during evaluation')
-
     args = parser.parse_args()
 
-    # Create log directory if it doesn't exist
-    if not os.path.exists(args.log_dir):
-        os.makedirs(args.log_dir)
+    num_gpus = torch.cuda.device_count()
+    if num_gpus < 2:
+        print(f"This script requires at least 2 GPUs to run, but only {num_gpus} GPU(s) are available.")
+        exit(1)
 
-    game = TicTacToe()
-    distributed_main(game, args, args.num_workers)
-
-if __name__ == '__main__':
-    main()
+    os.makedirs(args.log_dir, exist_ok=True)
+    mp.spawn(run, args=(num_gpus, args), nprocs=num_gpus, join=True)
