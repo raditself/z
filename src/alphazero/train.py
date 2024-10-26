@@ -1,5 +1,7 @@
 
+
 import argparse
+import os
 from .game import Game
 from .nnet import NNetWrapper
 from .coach import Coach
@@ -23,6 +25,7 @@ def main():
     parser.add_argument('--numItersForTrainExamplesHistory', type=int, default=20, help='Number of iterations for train examples history')
     parser.add_argument('--moveTime', type=int, default=1, help='Time limit for each move (in seconds)')
     parser.add_argument('--data_dir', type=str, default='./data', help='Directory for storing training data')
+    parser.add_argument('--resume', type=bool, default=False, help='Resume training from the latest checkpoint')
 
     # New arguments for neural architecture search
     parser.add_argument('--perform_nas', type=bool, default=False, help='Perform Neural Architecture Search')
@@ -44,21 +47,27 @@ def main():
     log.info('Loading %s...', NNetWrapper.__name__)
     nnet = NNetWrapper(g)
 
-    if args.load_model:
-        log.info('Loading checkpoint "%s/%s"...', args.load_folder_file[0], args.load_folder_file[1])
-        nnet.load_checkpoint(args.load_folder_file[0], args.load_folder_file[1])
-    else:
-        log.warning('Not loading a checkpoint!')
-
     log.info('Initializing DataHandler...')
     data_handler = DataHandler(args.data_dir)
 
     log.info('Loading the Coach...')
-    c = Coach(g, nnet, args, data_handler)
+    c = Coach(g, nnet, args)
 
-    if args.load_model:
+    if args.resume:
+        log.info('Resuming from latest checkpoint...')
+        checkpoint_files = [f for f in os.listdir(args.checkpoint) if f.endswith('.pth.tar')]
+        if checkpoint_files:
+            latest_checkpoint = max(checkpoint_files, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+            c.load_checkpoint(os.path.join(args.checkpoint, latest_checkpoint))
+        else:
+            log.warning('No checkpoint found. Starting from scratch.')
+    elif args.load_model:
+        log.info('Loading checkpoint "%s/%s"...', args.load_folder_file[0], args.load_folder_file[1])
+        nnet.load_checkpoint(args.load_folder_file[0], args.load_folder_file[1])
         log.info("Loading 'trainExamples' from file...")
         c.loadTrainExamples()
+    else:
+        log.warning('Not loading a checkpoint!')
 
     if args.online_play or args.online_analysis:
         c.online_integration(args)
@@ -68,3 +77,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
