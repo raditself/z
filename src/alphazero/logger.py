@@ -39,5 +39,13 @@ class AlphaZeroLogger:
     def log_histogram(self, tag, values, step):
         self.writer.add_histogram(tag, values, step)
 
+    def log_elo_rating(self, model_id, rating, step):
+        self.log_info(f"Model {model_id} Elo rating: {rating}")
+        self.log_scalar(f"Elo_Rating/{model_id}", rating, step)
+
+    def log_evaluation_result(self, model_id, opponent_id, score, step):
+        self.log_info(f"Evaluation: {model_id} vs {opponent_id}, Score: {score}")
+        self.log_scalar(f"Evaluation_Score/{model_id}_vs_{opponent_id}", score, step)
+
     def close(self):
         self.writer.close()
