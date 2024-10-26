@@ -1,74 +1,96 @@
-import random
-import tensorflow as tf
-from tensorflow.keras import layers, models, optimizers
-from chess_dataset import ChessDataset
-import time
 
-def create_model(num_layers, neurons_per_layer, activation_func, dropout_rate):
-    model = models.Sequential()
-    input_size = 64 * 12  # 8x8 board, 12 piece types (6 white, 6 black)
-    model.add(layers.Input(shape=(input_size,)))
-    for _ in range(num_layers):
-        model.add(layers.Dense(neurons_per_layer, activation=activation_func))
-        model.add(layers.Dropout(dropout_rate))
-    model.add(layers.Dense(1))  # Output layer for evaluation
+import numpy as np
+from tensorflow import keras
+from keras_tuner import RandomSearch
+from src.alphazero.model import ChessModel, CheckersModel
+
+def build_model(hp, game_type='chess'):
+    model = keras.Sequential()
+    
+    # Input layer
+    if game_type == 'chess':
+        input_shape = (8, 8, 12)  # 8x8 board, 12 piece types
+    elif game_type == 'checkers':
+        input_shape = (8, 8, 4)   # 8x8 board, 4 piece types (regular and king for each color)
+    
+    model.add(keras.layers.Input(shape=input_shape))
+    
+    # Convolutional layers
+    for i in range(hp.Int('num_conv_layers', 2, 5)):
+        model.add(keras.layers.Conv2D(
+            filters=hp.Int(f'conv_{i}_filters', 32, 256, step=32),
+            kernel_size=hp.Choice(f'conv_{i}_kernel', values=[3, 5]),
+            activation='relu',
+            padding='same'
+        ))
+        
+        if hp.Boolean(f'batch_norm_{i}'):
+            model.add(keras.layers.BatchNormalization())
+    
+    # Flatten the output
+    model.add(keras.layers.Flatten())
+    
+    # Dense layers
+    for i in range(hp.Int('num_dense_layers', 1, 3)):
+        model.add(keras.layers.Dense(
+            units=hp.Int(f'dense_{i}_units', 64, 512, step=64),
+            activation='relu'
+        ))
+        
+        if hp.Boolean(f'dropout_{i}'):
+            model.add(keras.layers.Dropout(hp.Float(f'dropout_{i}_rate', 0.1, 0.5, step=0.1)))
+    
+    # Output layers
+    if game_type == 'chess':
+        model.add(keras.layers.Dense(64, activation='softmax', name='policy_output'))  # 64 possible moves in chess
+    elif game_type == 'checkers':
+        model.add(keras.layers.Dense(32, activation='softmax', name='policy_output'))  # 32 possible moves in checkers
+    
+    model.add(keras.layers.Dense(1, activation='tanh', name='value_output'))
+    
+    model.compile(
+        optimizer=keras.optimizers.Adam(hp.Float('learning_rate', 1e-4, 1e-2, sampling='log')),
+        loss={'policy_output': 'categorical_crossentropy', 'value_output': 'mean_squared_error'},
+        loss_weights={'policy_output': 1.0, 'value_output': 1.0},
+        metrics={'policy_output': 'accuracy', 'value_output': 'mae'}
+    )
+    
     return model
 
-def train_and_evaluate(model, train_dataset, val_dataset, epochs=1):
-    model.compile(optimizer='adam', loss='mse')
+def neural_architecture_search(game_type='chess', max_trials=50, epochs=10):
+    if game_type == 'chess':
+        base_model = ChessModel()
+    elif game_type == 'checkers':
+        base_model = CheckersModel()
+    else:
+        raise ValueError("Invalid game type. Choose 'chess' or 'checkers'.")
     
-    model.fit(train_dataset, epochs=epochs, validation_data=val_dataset, verbose=0)
+    tuner = RandomSearch(
+        lambda hp: build_model(hp, game_type),
+        objective='val_loss',
+        max_trials=max_trials,
+        executions_per_trial=1,
+        directory='nas_results',
+        project_name=f'{game_type}_nas'
+    )
     
-    results = model.evaluate(val_dataset, verbose=0)
-    return results
+    # Generate some dummy data for training
+    x_train = np.random.rand(1000, *base_model.input_shape)
+    y_train = {
+        'policy_output': np.random.rand(1000, base_model.policy_dim),
+        'value_output': np.random.rand(1000, 1)
+    }
+    
+    tuner.search(x_train, y_train, epochs=epochs, validation_split=0.2)
+    
+    best_model = tuner.get_best_models(num_models=1)[0]
+    best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
+    
+    print("Best hyperparameters:")
+    print(best_hp.values)
+    
+    return best_model, best_hp
 
-def neural_architecture_search(db_path, num_trials=5):
-    print("Loading dataset...")
-    start_time = time.time()
-    full_dataset = ChessDataset(db_path)
-    print(f"Dataset loaded in {time.time() - start_time:.2f} seconds")
-
-    # Use only a small subset of the data for testing
-    subset_size = min(1000, len(full_dataset))
-    full_dataset = full_dataset.shuffle(buffer_size=len(full_dataset)).take(subset_size)
-
-    train_size = int(0.8 * subset_size)
-    train_dataset = full_dataset.take(train_size)
-    val_dataset = full_dataset.skip(train_size)
-
-    train_dataset = train_dataset.batch(32)
-    val_dataset = val_dataset.batch(32)
-
-    print(f"Train dataset size: {train_size}")
-    print(f"Validation dataset size: {subset_size - train_size}")
-
-    best_model = None
-    best_performance = float('inf')
-
-    for trial in range(num_trials):
-        print(f"Starting trial {trial + 1}/{num_trials}")
-        start_time = time.time()
-
-        num_layers = random.randint(2, 3)
-        neurons_per_layer = random.choice([64, 128])
-        activation_func = random.choice(['relu', 'leaky_relu'])
-        dropout_rate = random.uniform(0, 0.3)
-
-        model = create_model(num_layers, neurons_per_layer, activation_func, dropout_rate)
-        performance = train_and_evaluate(model, train_dataset, val_dataset)
-
-        print(f"Trial {trial + 1}/{num_trials}: Performance = {performance:.4f}, Time taken: {time.time() - start_time:.2f} seconds")
-
-        if performance < best_performance:
-            best_performance = performance
-            best_model = model
-
-    return best_model, best_performance
-
-if __name__ == "__main__":
-    best_model, best_performance = neural_architecture_search("chess_positions.db")
-    print(f"Best model performance: {best_performance}")
-    print(f"Best model architecture: {best_model.summary()}")
-
-    # Save the best model
-    best_model.save('best_model.h5')
+# Usage example:
+# best_chess_model, best_chess_hp = neural_architecture_search('chess')
+# best_checkers_model, best_checkers_hp = neural_architecture_search('checkers')

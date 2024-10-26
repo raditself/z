@@ -1,104 +1,91 @@
 
-import tensorflow as tf
-import os
-import argparse
-from tqdm import tqdm
-from .game import Game
-from .model import get_model
-from .mcts import MCTS
 import numpy as np
+from src.alphazero.chess_ai import ChessAI
+from src.alphazero.checkers_ai import CheckersAI
+from src.games.chess import ChessGame
+from src.games.checkers import CheckersGame
 
-def load_model(model_path):
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-    model = get_model()
-    model.load_weights(model_path)
-    return model
-
-def play_game(model1, model2, game, args):
-    mcts1 = MCTS(game, args, model1)
-    mcts2 = MCTS(game, args, model2)
-    
-    board = game.getInitBoard()
-    curPlayer = 1
-    
-    while True:
-        if curPlayer == 1:
-            action = np.argmax(mcts1.getActionProb(board, temp=0))
+class Tournament:
+    def __init__(self, game_type='chess'):
+        self.game_type = game_type
+        if game_type == 'chess':
+            self.game = ChessGame()
+            self.AI_class = ChessAI
+        elif game_type == 'checkers':
+            self.game = CheckersGame()
+            self.AI_class = CheckersAI
         else:
-            action = np.argmax(mcts2.getActionProb(board, temp=0))
-        
-        board, curPlayer = game.getNextState(board, curPlayer, action)
-        
-        if game.getGameEnded(board, curPlayer) != 0:
-            return game.getGameEnded(board, curPlayer)
+            raise ValueError("Invalid game type. Choose 'chess' or 'checkers'.")
 
-def run_tournament(model_paths, args):
-    game = Game()
-    models = [load_model(path) for path in model_paths]
-    n = len(models)
-    scores = np.zeros((n, n))
-    
-    total_games = n * (n - 1) * args.numGames // 2
-    with tqdm(total=total_games, desc="Tournament Progress") as pbar:
-        for i in range(n):
-            for j in range(i+1, n):
-                for _ in range(args.numGames // 2):
-                    result = play_game(models[i], models[j], game, args)
-                    if result == 1:
-                        scores[i, j] += 1
-                    elif result == -1:
-                        scores[j, i] += 1
-                    else:
-                        scores[i, j] += 0.5
-                        scores[j, i] += 0.5
-                    
-                    # Play reverse game
-                    result = play_game(models[j], models[i], game, args)
-                    if result == 1:
-                        scores[j, i] += 1
-                    elif result == -1:
-                        scores[i, j] += 1
-                    else:
-                        scores[i, j] += 0.5
-                        scores[j, i] += 0.5
-                    
-                    pbar.update(2)
-    
-    return scores
+    def play_match(self, ai1, ai2, num_games=10):
+        scores = [0, 0, 0]  # [ai1 wins, ai2 wins, draws]
 
-def calculate_elo(scores, k=32):
-    n = len(scores)
-    elo_ratings = [1500] * n
-    
-    for _ in range(10):  # Run multiple iterations for better convergence
-        for i in range(n):
-            for j in range(i+1, n):
-                ea = 1 / (1 + 10 ** ((elo_ratings[j] - elo_ratings[i]) / 400))
-                eb = 1 / (1 + 10 ** ((elo_ratings[i] - elo_ratings[j]) / 400))
+        for i in range(num_games):
+            board = self.game.get_initial_board()
+            players = [ai1, ai2] if i % 2 == 0 else [ai2, ai1]
+            
+            while not self.game.is_game_over(board):
+                current_player = players[self.game.get_current_player(board)]
+                move = current_player.get_move(board, temperature=0.1)
+                board = self.game.make_move(board, move)
+
+            winner = self.game.get_winner(board)
+            if winner == 1:
+                scores[0 if i % 2 == 0 else 1] += 1
+            elif winner == -1:
+                scores[1 if i % 2 == 0 else 0] += 1
+            else:
+                scores[2] += 1
+
+        return scores
+
+    def run_tournament(self, model_paths, num_games_per_match=10):
+        num_players = len(model_paths)
+        results = np.zeros((num_players, num_players))
+
+        for i in range(num_players):
+            for j in range(i+1, num_players):
+                ai1 = self.AI_class(model_paths[i])
+                ai2 = self.AI_class(model_paths[j])
                 
-                total_games = scores[i, j] + scores[j, i]
-                if total_games > 0:
-                    sa = scores[i, j] / total_games
-                    sb = scores[j, i] / total_games
-                    
-                    elo_ratings[i] += k * (sa - ea)
-                    elo_ratings[j] += k * (sb - eb)
-    
-    return elo_ratings
+                scores = self.play_match(ai1, ai2, num_games_per_match)
+                results[i, j] = scores[0]
+                results[j, i] = scores[1]
 
-def main():
-    parser = argparse.ArgumentParser(description="Run a tournament between different AlphaZero models")
-    parser.add_argument("model_paths", nargs="+", help="Paths to the model files")
-    parser.add_argument("--num_games", type=int, default=100, help="Number of games to play between each pair of models")
-    args = parser.parse_args()
+        return results
 
-    scores = run_tournament(args.model_paths, args.num_games)
-    elo_ratings = calculate_elo(scores)
-    
-    print("\nTournament Results:")
-    for i, path in enumerate(args.model_paths):
-        print(f"{path}: ELO Rating = {elo_ratings[i]:.2f}")
+    def print_results(self, results, model_names):
+        print(f"Tournament Results ({self.game_type}):")
+        print("+" + "-" * (9 * (len(model_names) + 1)) + "+")
+        print("|{:8s}|".format(""), end="")
+        for name in model_names:
+            print("{:8s}|".format(name[:8]), end="")
+        print()
+        print("+" + "-" * (9 * (len(model_names) + 1)) + "+")
 
-if __name__ == "__main__":
-    main()
+        for i, name in enumerate(model_names):
+            print("|{:8s}|".format(name[:8]), end="")
+            for j in range(len(model_names)):
+                if i == j:
+                    print("{:8s}|".format("-"), end="")
+                else:
+                    print("{:8.1f}|".format(results[i, j]), end="")
+            print()
+
+        print("+" + "-" * (9 * (len(model_names) + 1)) + "+")
+
+        total_wins = np.sum(results, axis=1)
+        print("Total Wins:")
+        for name, wins in zip(model_names, total_wins):
+            print(f"{name}: {wins}")
+
+# Usage example:
+# chess_tournament = Tournament('chess')
+# chess_model_paths = ['chess_model_v1.h5', 'chess_model_v2.h5', 'chess_model_v3.h5']
+# chess_results = chess_tournament.run_tournament(chess_model_paths)
+# chess_tournament.print_results(chess_results, ['v1', 'v2', 'v3'])
+
+# checkers_tournament = Tournament('checkers')
+# checkers_model_paths = ['checkers_model_v1.h5', 'checkers_model_v2.h5', 'checkers_model_v3.h5']
+# checkers_results = checkers_tournament.run_tournament(checkers_model_paths)
+# checkers_tournament.print_results(checkers_results, ['v1', 'v2', 'v3'])

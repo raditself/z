@@ -2,60 +2,72 @@
 import chess
 import chess.pgn
 import io
+from src.alphazero.chess_ai import ChessAI
 
 class GameAnalysis:
-    def __init__(self, ai):
-        self.ai = ai
+    def __init__(self, model_path):
+        self.ai = ChessAI(model_path)
 
-    def load_pgn(self, pgn_string):
-        pgn = io.StringIO(pgn_string)
-        game = chess.pgn.read_game(pgn)
-        return game
+    def load_pgn(self, pgn_file):
+        with open(pgn_file) as f:
+            return chess.pgn.read_game(f)
 
-    def analyze_game(self, game):
+    def analyze_game(self, game, depth=20):
         board = game.board()
         analysis = []
 
         for move in game.mainline_moves():
             board.push(move)
-            evaluation = self.ai.evaluate_board(board)
+            evaluation = self.ai.get_move(board.fen(), temperature=0)
             analysis.append({
                 'move': move,
                 'fen': board.fen(),
                 'evaluation': evaluation
             })
 
+            if len(analysis) >= depth:
+                break
+
         return analysis
 
-    def get_critical_positions(self, analysis, threshold=200):
-        critical_positions = []
-        prev_eval = 0
-
-        for pos in analysis:
-            eval_diff = abs(pos['evaluation'] - prev_eval)
-            if eval_diff > threshold:
-                critical_positions.append(pos)
-            prev_eval = pos['evaluation']
-
-        return critical_positions
-
-    def suggest_improvements(self, game, analysis):
-        board = game.board()
-        improvements = []
-
+    def print_analysis(self, analysis):
         for i, move_analysis in enumerate(analysis):
-            if i % 2 == 0:  # Only analyze player's moves
-                board.push(move_analysis['move'])
-                best_move = self.ai.get_best_move(board)
-                if best_move != move_analysis['move']:
-                    improvements.append({
-                        'move_number': i // 2 + 1,
-                        'player_move': move_analysis['move'],
-                        'suggested_move': best_move,
-                        'evaluation_diff': self.ai.evaluate_board(board) - move_analysis['evaluation']
-                    })
-                board.pop()
-            else:
-                board.push(move_analysis['move'])
+            print(f"Move {i+1}: {move_analysis['move']}")
+            print(f"Position: {move_analysis['fen']}")
+            print(f"AI Evaluation: {move_analysis['evaluation']}")
+            print("--------------------")
 
-        return improvements
+    def compare_to_engine(self, analysis, engine_analysis):
+        for i, (ai_move, engine_move) in enumerate(zip(analysis, engine_analysis)):
+            print(f"Move {i+1}:")
+            print(f"AI Move: {ai_move['move']}, Evaluation: {ai_move['evaluation']}")
+            print(f"Engine Move: {engine_move['move']}, Evaluation: {engine_move['evaluation']}")
+            print("--------------------")
+
+    def find_blunders(self, analysis, threshold=2.0):
+        blunders = []
+        for i in range(1, len(analysis)):
+            prev_eval = analysis[i-1]['evaluation']
+            curr_eval = analysis[i]['evaluation']
+            if abs(curr_eval - prev_eval) > threshold:
+                blunders.append({
+                    'move_number': i,
+                    'move': analysis[i]['move'],
+                    'prev_eval': prev_eval,
+                    'curr_eval': curr_eval
+                })
+        return blunders
+
+    def print_blunders(self, blunders):
+        for blunder in blunders:
+            print(f"Blunder at move {blunder['move_number']}: {blunder['move']}")
+            print(f"Evaluation change: {blunder['prev_eval']} -> {blunder['curr_eval']}")
+            print("--------------------")
+
+# Usage example:
+# analyzer = GameAnalysis('path_to_chess_model.h5')
+# game = analyzer.load_pgn('example_game.pgn')
+# analysis = analyzer.analyze_game(game)
+# analyzer.print_analysis(analysis)
+# blunders = analyzer.find_blunders(analysis)
+# analyzer.print_blunders(blunders)

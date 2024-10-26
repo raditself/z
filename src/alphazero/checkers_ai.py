@@ -1,13 +1,13 @@
 
 import numpy as np
 from src.alphazero.mcts_nn import MCTS
-from src.alphazero.model import ChessModel
-from src.games.chess import ChessGame
+from src.alphazero.model import CheckersModel
+from src.games.checkers import CheckersGame
 
-class ChessAI:
+class CheckersAI:
     def __init__(self, model_path=None):
-        self.game = ChessGame()
-        self.model = ChessModel()
+        self.game = CheckersGame()
+        self.model = CheckersModel()
         if model_path:
             self.model.load(model_path)
         self.mcts = MCTS(self.game, self.model)
@@ -52,9 +52,9 @@ class ChessAI:
             self.model.train(examples, num_epochs)
             
             # Save the model
-            self.model.save(f"chess_model_iteration_{iteration}.h5")
+            self.model.save(f"checkers_model_iteration_{iteration}.h5")
 
 # Usage example:
-# ai = ChessAI()
+# ai = CheckersAI()
 # ai.train(num_iterations=10, num_episodes=100, num_epochs=10)
 # best_move = ai.get_move(current_board)
