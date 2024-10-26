@@ -1,115 +1,67 @@
 
-# AlphaZero Chess and Checkers AI
+# Distributed AlphaZero Implementation
 
-This project implements an AI system for playing Chess and Checkers using the AlphaZero algorithm. It includes features such as neural network-based move evaluation, Monte Carlo Tree Search (MCTS), opening book support, game analysis, and a graphical user interface.
+This project implements a distributed version of the AlphaZero algorithm for the game of Tic-Tac-Toe. It uses PyTorch for neural network training and implements distributed training using PyTorch's DistributedDataParallel.
 
-## Features
+## Requirements
 
-- AlphaZero-style AI for Chess and Checkers
-- Neural Architecture Search for optimizing model architecture
-- Tournament system for comparing different AI versions
-- Opening book support for improved early game play
-- Time control support for realistic gameplay
-- Game analysis tools for reviewing and learning from games
-- User-friendly GUI for playing against the AI
-
-## Installation
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/alphazero-chess-checkers.git
-   cd alphazero-chess-checkers
-   ```
-
-2. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-## Usage
-
-### Training the AI
-
-To train the AI for Chess:
-```
-python src/alphazero/train.py --game chess --iterations 100 --episodes 100 --epochs 10
-```
-
-To train the AI for Checkers:
-```
-python src/alphazero/train.py --game checkers --iterations 100 --episodes 100 --epochs 10
-```
-
-### Playing against the AI
-
-To play Chess against the AI using the GUI:
-```
-python src/alphazero/game_gui.py --game chess --model_path path/to/chess_model.h5
-```
-
-To play Checkers against the AI using the GUI:
-```
-python src/alphazero/game_gui.py --game checkers --model_path path/to/checkers_model.h5
-```
-
-### Running a Tournament
-
-To run a tournament between different AI versions:
-```
-python src/alphazero/tournament.py --game chess --model_paths model1.h5 model2.h5 model3.h5
-```
-
-### Analyzing Games
-
-To analyze a chess game from a PGN file:
-```
-python src/alphazero/game_analysis.py --pgn_file game.pgn --model_path chess_model.h5
-```
-
-
-# AlphaZero Chess and Checkers AI
-
-[... Keep the existing content ...]
-
-## Running Tests
-
-To run the entire test suite:
-
-```
-python -m unittest discover tests
-```
-
-To run specific test files:
-
-```
-python -m unittest tests/test_mcts.py
-python -m unittest tests/test_chess_game.py
-python -m unittest tests/test_model.py
-python -m unittest tests/test_game_analysis.py
-```
-
-[... Keep the rest of the existing content ...]
+- Python 3.7+
+- PyTorch 1.7+
+- NumPy
 
 ## Project Structure
 
-- `src/alphazero/`: Contains the core AlphaZero implementation
-  - `mcts_nn.py`: Monte Carlo Tree Search with neural network guidance
-  - `model.py`: Neural network model definitions
-  - `train.py`: Training script for the AI
-  - `chess_ai.py` and `checkers_ai.py`: Game-specific AI implementations
-  - `tournament.py`: Tournament system for comparing AI versions
-  - `game_gui.py`: Graphical user interface for playing against the AI
-  - `game_analysis.py`: Tools for analyzing chess games
-  - `opening_book.py`: Opening book implementation
-  - `game_timer.py`: Time control implementation
-- `src/games/`: Contains game logic for Chess and Checkers
-- `tests/`: Unit tests and integration tests
-- `.github/workflows/`: CI/CD configuration using GitHub Actions
+- `src/alphazero/`
+  - `alphazero_net.py`: Defines the neural network architecture
+  - `mcts.py`: Implements the Monte Carlo Tree Search algorithm
+  - `alphazero.py`: Contains the core AlphaZero algorithm
+  - `distributed_alphazero.py`: Implements the distributed version of AlphaZero
+  - `evaluator.py`: Provides functionality to evaluate trained models
+  - `game.py`: Defines the abstract base class for games
+  - `tictactoe.py`: Implements the Tic-Tac-Toe game
+  - `logger.py`: Handles logging and visualization of training progress
+  - `run_distributed_training.py`: Main script to run the distributed training
 
-## Contributing
+## How to Run
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+To start the distributed training process, run the following command:
 
-## License
+```
+python -m src.alphazero.run_distributed_training
+```
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+You can customize the training process by passing additional arguments. For example:
+
+```
+python -m src.alphazero.run_distributed_training --num_iterations 200 --num_workers 8 --eval_games 200
+```
+
+## Command-line Arguments
+
+- `--num_iterations`: Number of training iterations (default: 100)
+- `--num_episodes`: Number of self-play episodes per iteration (default: 100)
+- `--num_simulations`: Number of MCTS simulations per move (default: 25)
+- `--c_puct`: Exploration constant for PUCT (default: 1.0)
+- `--lr`: Learning rate for the optimizer (default: 0.001)
+- `--weight_decay`: Weight decay for the optimizer (default: 1e-4)
+- `--batch_size`: Batch size for training (default: 64)
+- `--epochs`: Number of epochs per training iteration (default: 10)
+- `--checkpoint_interval`: Interval for saving model checkpoints (default: 10)
+- `--num_workers`: Number of worker processes for distributed training (default: 4)
+- `--log_dir`: Directory for storing logs (default: 'logs')
+- `--eval_games`: Number of games to play during evaluation (default: 100)
+
+## Monitoring Training Progress
+
+Training progress can be monitored using TensorBoard. To start TensorBoard, run:
+
+```
+tensorboard --logdir=logs
+```
+
+Then open a web browser and go to `http://localhost:6006` to view the training metrics.
+
+## Extending to Other Games
+
+To extend this implementation to other games, create a new game class that inherits from the `Game` base class in `game.py`. Implement all the required methods, and then update the `run_distributed_training.py` script to use your new game class.
+

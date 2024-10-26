@@ -1,121 +1,77 @@
 
 import math
 import numpy as np
-import multiprocessing
-from multiprocessing import Pool
-import tensorflow as tf
-from .game import Game
-from .endgame_tablebase import EndgameTablebase
+
+class Node:
+    def __init__(self, prior):
+        self.visit_count = 0
+        self.prior = prior
+        self.value_sum = 0
+        self.children = {}
+        self.state = None
+
+    def expanded(self):
+        return len(self.children) > 0
+
+    def value(self):
+        if self.visit_count == 0:
+            return 0
+        return self.value_sum / self.visit_count
 
 class MCTS:
-    def __init__(self, game: Game, args, model):
+    def __init__(self, game, model, args):
         self.game = game
-        self.args = args
         self.model = model
-        self.Qsa = {}  # stores Q values for s,a
-        self.Nsa = {}  # stores #times edge s,a was visited
-        self.Ns = {}   # stores #times board s was visited
-        self.Ps = {}   # stores initial policy (returned by neural net)
-        self.Es = {}   # stores game.getGameEnded ended for board s
-        self.Vs = {}   # stores game.getValidMoves for board s
-        self.tablebase = EndgameTablebase()
-        self.pool = Pool(processes=multiprocessing.cpu_count())
+        self.args = args
 
-    def __del__(self):
-        self.pool.close()
-        self.pool.join()
+    def search(self, state):
+        root = Node(0)
+        root.state = state
+        for _ in range(self.args.num_simulations):
+            node = root
+            search_path = [node]
 
-    def parallel_search(self, canonicalBoard):
-        results = self.pool.map(self.search, [canonicalBoard] * self.args.numMCTSSims)
-        for v in results:
-            s = self.game.stringRepresentation(canonicalBoard)
-            self.Ns[s] += 1
+            while node.expanded():
+                action, node = self.select_child(node)
+                search_path.append(node)
 
-    def getActionProb(self, canonicalBoard, temp=1, time_left=None):
-        if self.tablebase.should_use_tablebase(canonicalBoard, time_left):
-            best_move = self.tablebase.get_best_move(canonicalBoard)
-            if best_move:
-                probs = [0] * self.game.getActionSize()
-                probs[self.game.moveToAction(canonicalBoard, best_move)] = 1
-                return probs
+            parent = search_path[-2]
+            state = parent.state
+            next_state, _ = self.game.get_next_state(state, action)
+            value = self.evaluate(next_state, search_path)
 
-        self.parallel_search(canonicalBoard)
+            self.backpropagate(search_path, value)
 
-        s = self.game.stringRepresentation(canonicalBoard)
-        counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.getActionSize())]
+        return self.select_action(root)
 
-        if temp == 0:
-            bestAs = tf.where(tf.equal(counts, tf.reduce_max(counts)))
-            bestA = tf.random.shuffle(bestAs)[0]
-            probs = tf.zeros_like(counts)
-            probs = tf.tensor_scatter_nd_update(probs, [[bestA]], [1.0])
-            return probs.numpy()
+    def select_child(self, node):
+        _, action, child = max((self.ucb_score(node, child), action, child) for action, child in node.children.items())
+        return action, child
 
-        counts = [x ** (1. / temp) for x in counts]
-        counts_sum = float(sum(counts))
-        probs = [x / counts_sum for x in counts]
-        return probs
+    def ucb_score(self, parent, child):
+        prior_score = child.prior * math.sqrt(parent.visit_count) / (child.visit_count + 1)
+        value_score = -child.value()
+        return value_score + self.args.c_puct * prior_score
 
-    def search(self, canonicalBoard):
-        s = self.game.stringRepresentation(canonicalBoard)
+    def evaluate(self, state, search_path):
+        value = self.game.get_reward(state)
+        if value is None:
+            policy, value = self.model(state)
+            policy = self.game.get_valid_moves(state) * policy
+            policy /= np.sum(policy)
+            for action, p in enumerate(policy):
+                if p > 0:
+                    search_path[-1].children[action] = Node(p)
+        return value
 
-        if s not in self.Es:
-            self.Es[s] = self.game.getGameEnded(canonicalBoard, 1)
-        if self.Es[s] != 0:
-            return -self.Es[s]
+    def backpropagate(self, search_path, value):
+        for node in reversed(search_path):
+            node.value_sum += value
+            node.visit_count += 1
 
-        if self.tablebase.should_use_tablebase(canonicalBoard, time_left=None):
-            wdl = self.tablebase.probe_wdl(canonicalBoard.fen())
-            if wdl is not None:
-                return -wdl / 2  # Convert to our value range (-1 to 1)
-
-        if s not in self.Ps:
-            board_tensor = tf.convert_to_tensor(canonicalBoard, dtype=tf.float32)
-            board_tensor = tf.expand_dims(board_tensor, 0)  # Add batch dimension
-            policy, value = self.model(board_tensor)
-            self.Ps[s], v = policy.numpy()[0], value.numpy()[0][0]
-            valids = self.game.getValidMoves(canonicalBoard, 1)
-            self.Ps[s] = self.Ps[s] * valids  # masking invalid moves
-            sum_Ps_s = np.sum(self.Ps[s])
-            if sum_Ps_s > 0:
-                self.Ps[s] /= sum_Ps_s  # renormalize
-            else:
-                print("All valid moves were masked, do workaround.")
-                self.Ps[s] = self.Ps[s] + valids
-                self.Ps[s] /= np.sum(self.Ps[s])
-
-            self.Vs[s] = valids
-            self.Ns[s] = 0
-            return -v
-
-        valids = self.Vs[s]
-        cur_best = -float('inf')
-        best_act = -1
-
-        for a in range(self.game.getActionSize()):
-            if valids[a]:
-                if (s, a) in self.Qsa:
-                    u = self.Qsa[(s, a)] + self.args.cpuct * self.Ps[s][a] * math.sqrt(self.Ns[s]) / (
-                            1 + self.Nsa[(s, a)])
-                else:
-                    u = self.args.cpuct * self.Ps[s][a] * math.sqrt(self.Ns[s] + self.args.EPS)
-
-                if u > cur_best:
-                    cur_best = u
-                    best_act = a
-
-        a = best_act
-        next_s, next_player = self.game.getNextState(canonicalBoard, 1, a)
-        next_s = self.game.getCanonicalForm(next_s, next_player)
-
-        v = self.search(next_s)
-
-        if (s, a) in self.Qsa:
-            self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / (self.Nsa[(s, a)] + 1)
-            self.Nsa[(s, a)] += 1
-        else:
-            self.Qsa[(s, a)] = v
-            self.Nsa[(s, a)] = 1
-
-        self.Ns[s] += 1
-        return -v
+    def select_action(self, root):
+        visit_counts = [(action, child.visit_count) for action, child in root.children.items()]
+        if len(visit_counts) == 0:
+            return None
+        _, action = max(((c, a) for a, c in visit_counts), key=lambda x: x[0])
+        return action
