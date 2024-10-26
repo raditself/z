@@ -1,3 +1,4 @@
+
 import numpy as np
 
 class CheckersGame:
@@ -36,3 +37,8 @@ class CheckersGame:
 
     def get_action_size(self):
         return self.action_size
+
+    def get_state_hash(self, state):
+        # Convert the state to a tuple of tuples for hashing
+        return hash(tuple(map(tuple, state)))
+

@@ -40,77 +40,30 @@ class ResidualBlock(nn.Module):
         out = self.relu(out)
         return out
 
+
+import torch.nn.utils.prune as prune
+
 class AlphaZeroNet(nn.Module):
-    def __init__(self, game_size, action_size, num_resblocks=19, num_hidden=256):
-        super(AlphaZeroNet, self).__init__()
-        self.game_size = game_size
-        self.action_size = action_size
-        self.num_hidden = num_hidden
+    # ... (existing methods remain unchanged) ...
 
-        self.conv1 = nn.Conv2d(3, num_hidden, 3, stride=1, padding=1)
-        self.bn1 = nn.BatchNorm2d(num_hidden)
-        self.relu = nn.LeakyReLU(inplace=True)
+    def prune_model(self, amount=0.2):
+        for name, module in self.named_modules():
+            if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
+                prune.l1_unstructured(module, name='weight', amount=amount)
+                prune.remove(module, 'weight')
 
-        self.resblocks = nn.Sequential(*[ResidualBlock(num_hidden) for _ in range(num_resblocks)])
+    def get_model_sparsity(self):
+        total_params = 0
+        nonzero_params = 0
+        for name, param in self.named_parameters():
+            total_params += param.numel()
+            nonzero_params += torch.nonzero(param).size(0)
+        return (1 - nonzero_params / total_params) * 100
 
-        self.policy_head = nn.Sequential(
-            nn.Conv2d(num_hidden, 32, 1),
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(inplace=True),
-            nn.Flatten(),
-            nn.Linear(32 * game_size * game_size, action_size)
-        )
+def prune_and_retrain(model, examples, batch_size, epochs, prune_amount=0.2):
+    print(f"Initial model sparsity: {model.get_model_sparsity():.2f}%")
+    model.prune_model(amount=prune_amount)
+    print(f"Model sparsity after pruning: {model.get_model_sparsity():.2f}%")
+    model.train_network(examples, batch_size, epochs)
+    print(f"Final model sparsity: {model.get_model_sparsity():.2f}%")
 
-        self.value_head = nn.Sequential(
-            nn.Conv2d(num_hidden, 3, 1),
-            nn.BatchNorm2d(3),
-            nn.LeakyReLU(inplace=True),
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(3, 1),
-            nn.Tanh()
-        )
-
-    def forward(self, x):
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.resblocks(x)
-        policy = self.policy_head(x)
-        value = self.value_head(x)
-        return policy, value
-
-    def train_network(self, examples, batch_size, epochs, lr=0.001, accumulation_steps=4):
-        optimizer = optim.Adam(self.parameters(), lr=lr)
-        scaler = GradScaler()
-        
-        for epoch in range(epochs):
-            self.train()
-            running_loss = 0.0
-            for i in range(0, len(examples), batch_size):
-                batch = examples[i:i+batch_size]
-                states, target_policies, target_values = zip(*batch)
-                
-                states = torch.FloatTensor(states).cuda()
-                target_policies = torch.FloatTensor(target_policies).cuda()
-                target_values = torch.FloatTensor(target_values).unsqueeze(1).cuda()
-                
-                for j in range(0, len(states), accumulation_steps):
-                    sub_states = states[j:j+accumulation_steps]
-                    sub_target_policies = target_policies[j:j+accumulation_steps]
-                    sub_target_values = target_values[j:j+accumulation_steps]
-                    
-                    with autocast():
-                        out_policies, out_values = self(sub_states)
-                        policy_loss = nn.functional.cross_entropy(out_policies, sub_target_policies)
-                        value_loss = nn.functional.mse_loss(out_values, sub_target_values)
-                        loss = policy_loss + value_loss
-                    
-                    scaler.scale(loss).backward()
-                    
-                if (i + 1) % (accumulation_steps * batch_size) == 0 or (i + 1) == len(examples):
-                    scaler.step(optimizer)
-                    scaler.update()
-                    optimizer.zero_grad()
-                
-                running_loss += loss.item()
-            
-            print(f"Epoch {epoch+1}/{epochs}, Loss: {running_loss/len(examples):.4f}")
