@@ -2,12 +2,12 @@
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
 import os
 from .alphazero import AlphaZero
 from .logger import AlphaZeroLogger
 from .evaluator import AlphaZeroEvaluator, load_model
 from .alphazero_net import AlphaZeroNet
+from .parameter_server import ParameterServer, run_parameter_server
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -25,9 +25,11 @@ class DistributedAlphaZero(AlphaZero):
         self.world_size = world_size
         self.device = torch.device(f"cuda:{rank}")
         self.net = self.net.to(self.device)
-        self.net = DDP(self.net, device_ids=[rank])
         self.logger = AlphaZeroLogger(os.path.join(args.log_dir, f'worker_{rank}'))
         self.evaluator = AlphaZeroEvaluator(game, args)
+        
+        if self.rank == 0:
+            self.parameter_server = ParameterServer(self.net)
 
     def distributed_self_play(self):
         examples = self.self_play()
@@ -44,18 +46,14 @@ class DistributedAlphaZero(AlphaZero):
             examples = self.distributed_self_play()
             
             policy_loss, value_loss = self.train(examples)
-            dist.all_reduce(policy_loss)
-            dist.all_reduce(value_loss)
-            policy_loss /= self.world_size
-            value_loss /= self.world_size
             
             if self.rank == 0:
                 self.logger.log_info(f"Training on {len(examples)} examples")
-                self.logger.log_scalar('policy_loss', policy_loss.item(), iteration)
-                self.logger.log_scalar('value_loss', value_loss.item(), iteration)
+                self.logger.log_scalar('policy_loss', policy_loss, iteration)
+                self.logger.log_scalar('value_loss', value_loss, iteration)
                 
                 current_model_path = f'model_iter_{iteration}.pth'
-                torch.save(self.net.module.state_dict(), current_model_path)
+                torch.save(self.net.state_dict(), current_model_path)
                 
                 if best_model_path:
                     best_model = load_model(AlphaZeroNet, best_model_path, self.game, self.args)
@@ -72,11 +70,8 @@ class DistributedAlphaZero(AlphaZero):
                 else:
                     best_model_path = current_model_path
             
-            dist.barrier()
-            for name, param in self.net.named_parameters():
-                dist.broadcast(param.data, 0)
-                if self.rank == 0:
-                    self.logger.log_histogram(f'param_{name}', param.data, iteration)
+            # Synchronize model parameters
+            self.sync_parameters()
 
             self.logger.log_info(f"Worker {self.rank}: Finished iteration {iteration}")
 
@@ -98,9 +93,14 @@ class DistributedAlphaZero(AlphaZero):
                 value_loss = self.loss_value(out_value.squeeze(-1), value_targets)
                 loss = policy_loss + value_loss
 
-                self.optimizer.zero_grad()
+                # Calculate gradients
                 loss.backward()
-                self.optimizer.step()
+
+                # Send gradients to parameter server
+                self.send_gradients()
+
+                # Receive updated parameters from parameter server
+                self.sync_parameters()
 
                 total_policy_loss += policy_loss.item()
                 total_value_loss += value_loss.item()
@@ -108,25 +108,42 @@ class DistributedAlphaZero(AlphaZero):
 
         return total_policy_loss / num_batches, total_value_loss / num_batches
 
+    def send_gradients(self):
+        gradients = [param.grad for param in self.net.parameters()]
+        for grad in gradients:
+            dist.send(grad, dst=0)
+
+    def sync_parameters(self):
+        for param in self.net.parameters():
+            dist.broadcast(param.data, src=0)
+
 def run_worker(rank, world_size, game, args):
     setup(rank, world_size)
-    alphazero = DistributedAlphaZero(game, args, rank, world_size)
-    alphazero.distributed_learn()
-    alphazero.logger.close()
-    cleanup()
+    try:
+        if rank == 0:
+            parameter_server = ParameterServer(AlphaZeroNet(game, args))
+            run_parameter_server(rank, world_size, parameter_server.model)
+        else:
+            alphazero = DistributedAlphaZero(game, args, rank, world_size)
+            alphazero.distributed_learn()
+    except Exception as e:
+        print(f"Error in worker {rank}: {str(e)}")
+    finally:
+        if rank != 0:
+            alphazero.logger.close()
+        cleanup()
 
 def distributed_main(game, args, num_workers):
-    mp.spawn(run_worker, args=(num_workers, game, args), nprocs=num_workers, join=True)
+    mp.spawn(run_worker, args=(num_workers + 1, game, args), nprocs=num_workers + 1, join=True)
 
 if __name__ == "__main__":
     from .tictactoe import TicTacToe
     import argparse
 
-    parser = argparse.ArgumentParser(description='Train Distributed AlphaZero for Tic-Tac-Toe')
-    # Add all necessary arguments here
+    parser = argparse.ArgumentParser(description='Distributed AlphaZero')
+    parser.add_argument('--num_workers', type=int, default=4, help='Number of worker processes')
     parser.add_argument('--log_dir', type=str, default='logs', help='Directory for storing logs')
     args = parser.parse_args()
 
     game = TicTacToe()
-    num_workers = 4  # Or any other number of workers you want to use
-    distributed_main(game, args, num_workers)
+    distributed_main(game, args, args.num_workers)
