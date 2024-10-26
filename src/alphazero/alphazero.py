@@ -1,10 +1,11 @@
 
+
 import torch
 import torch.nn.functional as F
 import numpy as np
 import random
 from .alphazero_net import AlphaZeroNet
-from .mcts import MCTS
+from .mcts_with_transposition import MCTS  # Updated import
 from .parallel_self_play import ParallelSelfPlay
 
 class AlphaZero:
@@ -13,7 +14,8 @@ class AlphaZero:
         self.args = args
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net = AlphaZeroNet(game.board_size, game.action_size).to(self.device)
-        self.mcts = MCTS(game, self.net, args)
+        self.mcts = MCTS(game, self.net, num_simulations=args.num_simulations,
+                         c_puct=args.c_puct, c_pw=args.c_pw, alpha_pw=args.alpha_pw)  # Updated MCTS initialization
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         self.parallel_self_play = ParallelSelfPlay(game, args)
 
@@ -49,10 +51,9 @@ class AlphaZero:
             if iteration % self.args.checkpoint_interval == 0:
                 torch.save(self.net.state_dict(), f'checkpoint_{iteration}.pth')
 
-    def play(self, states):
+    def play(self, state):
         self.net.eval()
         with torch.no_grad():
-            if not isinstance(states, list):
-                states = [states]
-            actions = self.mcts.search(states)
-            return actions if len(actions) > 1 else actions[0]
+            action_probs = self.mcts.get_action_prob(state)
+            return np.argmax(action_probs)  # Choose the action with the highest probability
+
