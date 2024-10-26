@@ -83,7 +83,77 @@ class Checkers:
         symbols = {0: '.', 1: 'x', 2: 'o'}
         return '\n'.join(' '.join(symbols[piece] for piece in row) for row in self.board)
 
+    
     def evaluate_position(self):
+        if self.is_game_over():
+            winner = self.get_winner()
+            if winner == 1:
+                return 1000
+            elif winner == 2:
+                return -1000
+            else:
+                return 0
+
+        # Piece count and king count
+        piece_count = np.sum(self.board == 1) - np.sum(self.board == 2)
+        king_count = np.sum(self.board == 3) - np.sum(self.board == 4)
+
+        # Evaluate piece positioning
+        player1_positions = np.argwhere(self.board == 1)
+        player2_positions = np.argwhere(self.board == 2)
+        player1_avg_rank = np.mean(player1_positions[:, 0]) if len(player1_positions) > 0 else 0
+        player2_avg_rank = np.mean(player2_positions[:, 0]) if len(player2_positions) > 0 else 0
+        position_score = player2_avg_rank - player1_avg_rank
+
+        # Control of key squares (corners and center)
+        key_squares = [(0, 0), (0, 7), (7, 0), (7, 7), (3, 3), (3, 4), (4, 3), (4, 4)]
+        key_square_control = sum(self.board[r, c] == 1 for r, c in key_squares) - sum(self.board[r, c] == 2 for r, c in key_squares)
+
+        # Mobility (number of legal moves)
+        current_player_moves = len(self.get_valid_moves())
+        self.current_player = 3 - self.current_player
+        opponent_moves = len(self.get_valid_moves())
+        self.current_player = 3 - self.current_player
+        mobility = current_player_moves - opponent_moves
+
+        # Pawn structure (pawns defending each other)
+        def count_defended_pawns(player):
+            count = 0
+            for r in range(self.board_size):
+                for c in range(self.board_size):
+                    if self.board[r, c] == player:
+                        if player == 1 and r < self.board_size - 1:
+                            count += (c > 0 and self.board[r+1, c-1] == player) + (c < self.board_size - 1 and self.board[r+1, c+1] == player)
+                        elif player == 2 and r > 0:
+                            count += (c > 0 and self.board[r-1, c-1] == player) + (c < self.board_size - 1 and self.board[r-1, c+1] == player)
+            return count
+
+        pawn_structure = count_defended_pawns(1) - count_defended_pawns(2)
+
+        # Endgame specific evaluation
+        total_pieces = np.sum(self.board != 0)
+        if total_pieces <= 10:  # Assuming endgame when 10 or fewer pieces remain
+            # In endgame, prioritize king count and centralization
+            king_weight = 3
+            centralization_weight = 2
+            piece_weight = 1
+        else:
+            king_weight = 2
+            centralization_weight = 1
+            piece_weight = 2
+
+        # Combine all factors
+        evaluation = (
+            piece_weight * piece_count +
+            king_weight * king_count * 3 +
+            centralization_weight * position_score +
+            key_square_control * 2 +
+            mobility * 0.5 +
+            pawn_structure * 0.5
+        )
+
+        return evaluation if self.current_player == 1 else -evaluation
+
         if self.is_game_over():
             winner = self.get_winner()
             if winner == 1:

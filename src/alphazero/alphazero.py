@@ -5,6 +5,7 @@ import numpy as np
 import random
 from .alphazero_net import AlphaZeroNet
 from .mcts import MCTS
+from .parallel_self_play import ParallelSelfPlay
 
 class AlphaZero:
     def __init__(self, game, args):
@@ -14,33 +15,13 @@ class AlphaZero:
         self.net = AlphaZeroNet(game.board_size, game.action_size).to(self.device)
         self.mcts = MCTS(game, self.net, args)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        self.parallel_self_play = ParallelSelfPlay(game, args)
 
-    def self_play(self):
-        memory = []
-        state = self.game.get_initial_state()
-        player = 1
-
-        while True:
-            canonical_state = self.game.get_canonical_form(state, player)
-            action_probs = self.mcts.search(canonical_state)
-
-            memory.append((canonical_state, action_probs, player))
-
-            action = np.random.choice(self.game.action_size, p=action_probs)
-            state = self.game.get_next_state(state, action, player)
-
-            value, is_terminal = self.game.get_value_and_terminated(state, action)
-
-            if is_terminal:
-                return_memory = []
-                for hist_state, hist_action_probs, hist_player in memory:
-                    hist_outcome = value if hist_player == player else -value
-                    return_memory.append((hist_state, hist_action_probs, hist_outcome))
-                return return_memory
-
-            player = self.game.get_opponent(player)
+    def self_play(self, num_games):
+        return self.parallel_self_play.parallel_self_play(num_games)
 
     def train(self, examples):
+        self.net.train()
         for _ in range(self.args.epochs):
             batch = random.sample(examples, min(self.args.batch_size, len(examples)))
             state, policy_targets, value_targets = zip(*batch)
@@ -61,16 +42,17 @@ class AlphaZero:
 
     def learn(self):
         for iteration in range(self.args.num_iterations):
-            examples = []
-            for episode in range(self.args.num_episodes):
-                examples += self.self_play()
+            examples = self.self_play(self.args.num_episodes)
 
             self.train(examples)
 
             if iteration % self.args.checkpoint_interval == 0:
                 torch.save(self.net.state_dict(), f'checkpoint_{iteration}.pth')
 
-    def play(self, state):
+    def play(self, states):
+        self.net.eval()
         with torch.no_grad():
-            pi = self.mcts.search(state)
-            return np.argmax(pi)
+            if not isinstance(states, list):
+                states = [states]
+            actions = self.mcts.search(states)
+            return actions if len(actions) > 1 else actions[0]
