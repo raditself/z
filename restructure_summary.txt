@@ -1,0 +1,39 @@
+Changes made to repository structure:
+1. Merged contents of nested 'z' directory into root level.
+2. Updated 'src', 'static', and 'templates' directories with latest versions.
+3. Removed nested 'z' directory.
+\nFiles affected:
+./.gitignore
+./run.py
+./src/__init__.py
+./src/alphazero/__init__.py
+./src/alphazero/ai.py
+./src/alphazero/chess_timer.py
+./src/alphazero/chess_variants.py
+./src/alphazero/game.py
+./src/alphazero/game_analysis.py
+./src/alphazero/game_state.py
+./src/alphazero/mcts.py
+./src/alphazero/model.py
+./src/alphazero/opening_book.py
+./src/alphazero/self_play.py
+./src/alphazero/train.py
+./src/alphazero/logging_system.py
+./src/alphazero/rating_system.py
+./src/web/__init__.py
+./src/web/app.py
+./src/web/visualization.py
+./static/script.js
+./static/style.css
+./templates/index.html
+./README.md
+./__init__.py
+./integration/__init__.py
+./integration/test_self_play.py
+./run_tests.py
+./unit/__init__.py
+./unit/test_game.py
+./unit/test_mcts.py
+./unit/test_model.py
+./restructure_summary.txt
+\nPlease review these changes and commit them once the ongoing git process is complete.

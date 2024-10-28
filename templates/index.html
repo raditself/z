@@ -1,0 +1,79 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced AlphaZero Game Interface</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        #game-board { display: inline-block; }
+        #game-info { display: inline-block; vertical-align: top; margin-left: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Advanced AlphaZero Game Interface</h1>
+    <select id="game-select">
+        <option value="">Select a game</option>
+    </select>
+    <div id="game-container" style="display: none;">
+        <div id="game-board"></div>
+        <div id="game-info">
+            <h2>Game Information</h2>
+            <p>Heuristic Value: <span id="heuristic-value"></span></p>
+            <p>Game Status: <span id="game-status"></span></p>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentGame = null;
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+
+        socket.on('game_selected', (data) => {
+            currentGame = data.game;
+            $('#game-container').show();
+            initializeBoard(data.initial_state);
+        });
+
+        socket.on('move_made', (data) => {
+            updateBoard(data.new_state);
+            $('#heuristic-value').text(data.heuristic_value.toFixed(2));
+            $('#game-status').text(data.is_terminal ? 'Game Over' : 'In Progress');
+        });
+
+        socket.on('game_over', (data) => {
+            updateBoard(data.final_state);
+            $('#game-status').text(`Game Over - Reward: ${data.reward}`);
+        });
+
+        $('#game-select').on('change', function() {
+            const selectedGame = $(this).val();
+            if (selectedGame) {
+                socket.emit('select_game', selectedGame);
+            }
+        });
+
+        function initializeBoard(state) {
+            // Implement game-specific board initialization
+        }
+
+        function updateBoard(state) {
+            // Implement game-specific board update
+        }
+
+        // Populate game selection dropdown
+        const games = ['chess', 'go', 'shogi', 'othello', 'connect_four'];
+        games.forEach(game => {
+            $('#game-select').append($('<option>', {
+                value: game,
+                text: game.charAt(0).toUpperCase() + game.slice(1)
+            }));
+        });
+    </script>
+</body>
+</html>
